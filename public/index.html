@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#172c29">
+  <title>BayReady · Reservation simulator</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a href="#main" class="brand" aria-label="BayReady home"><span class="brand-icon" aria-hidden="true">b<span>↗</span></span><span>BayReady<span class="brand-sub">CHARGING, WITH CERTAINTY</span></span></a>
+      <div class="side-section">YOUR WORKSPACE</div>
+      <a class="nav-link active" href="#stations"><span aria-hidden="true">▦</span> Find & reserve</a>
+      <a class="nav-link" href="#activity"><span aria-hidden="true">↻</span> Bay activity</a>
+      <a class="nav-link" href="#integration"><span aria-hidden="true">↗</span> Connect discovery</a>
+      <div class="side-note"><span class="tiny-label">BUILT FOR THE CHALLENGE</span><p>From finding a charger to a bay that’s ready.</p><span class="side-note-detail">Independent prototype concept.<br>Not an official Ecurious app.</span></div>
+      <div class="side-bottom"><span class="status-dot"></span> Local development <span class="version">v0.1</span></div>
+    </aside>
+
+    <main id="main">
+      <header class="topbar"><span>Hackathon workspace <span class="breadcrumb">/</span> Reservation demo</span><span class="simulator-badge"><span></span> SIMULATOR</span></header>
+      <div class="page-content">
+        <section class="hero" aria-labelledby="page-title">
+          <div><p class="eyebrow">LESS UNCERTAINTY. MORE CHARGING.</p><h1 id="page-title">Your next charge.<br><span>A space held for you.</span></h1><p class="hero-description">Explore the complete reservation journey with a simulated bay. Connect the venue hardware on site.</p></div>
+          <div class="hero-note"><span class="hero-note-icon" aria-hidden="true">↗</span><strong>One bay. One clear journey.</strong><p>Reserve → arrive → charge → depart → release</p><span>Synthetic stations · Simulated hardware</span></div>
+        </section>
+
+        <div id="connection-alert" class="connection-alert" hidden>Simulator server unavailable. Start the local server and retry.</div>
+        <div class="summary-grid">
+          <div class="summary-card"><span class="summary-icon" aria-hidden="true">⌁</span><div><span class="meta-label">HARDWARE CONNECTION</span><strong id="hardware-mode">Connecting…</strong><span class="summary-detail">Local simulator · no physical control</span></div></div>
+          <div class="summary-card"><span class="summary-icon" aria-hidden="true">▣</span><div><span class="meta-label">DEMO BAY</span><strong id="summary-bay-status">Loading…</strong><span class="summary-detail" id="summary-occupancy">Waiting for state</span></div></div>
+          <div class="summary-card"><span class="summary-icon" aria-hidden="true">◷</span><div><span class="meta-label">RESERVATION WINDOW</span><strong id="summary-countdown">No active hold</strong><span class="summary-detail" id="summary-reservation">Reserve the demo bay to begin</span></div></div>
+        </div>
+
+        <div class="workspace-grid">
+          <section id="stations" class="panel stations-panel" aria-labelledby="stations-title">
+            <div class="panel-heading"><div><p class="eyebrow">01 / DISCOVER</p><h2 id="stations-title">Find your charge</h2></div><span class="count-tag">3 examples</span></div>
+            <label class="search-field"><span aria-hidden="true">⌕</span><input id="station-search" type="search" placeholder="Search station or connector" autocomplete="off" aria-label="Search synthetic stations"></label>
+            <p class="section-hint">All stations below are synthetic examples.</p>
+            <div id="station-list" class="station-list"></div>
+            <p id="station-empty" class="empty-text" hidden>No example stations match your search.</p>
+            <div class="discovery-note"><span aria-hidden="true">i</span><p>Only the demo bay supports reservations. Public directory results are discovery only.</p></div>
+          </section>
+
+          <section class="panel reservation-panel" aria-labelledby="reservation-title">
+            <div class="panel-heading"><div><p class="eyebrow">02 / YOUR RESERVATION</p><h2 id="reservation-title">Venue demo bay</h2></div><span id="bay-state" class="state-badge">Loading</span></div>
+            <div class="bay-overview">
+              <div class="bay-schematic" id="bay-schematic" role="img" aria-label="Simulated bay, loading state"><span class="bay-outline"></span><span class="bay-number">01</span><span class="bay-car" aria-hidden="true"><span></span></span><span class="barrier-arm" aria-hidden="true"></span><span class="barrier-post" aria-hidden="true"></span><span class="bay-entry">BAY ENTRY</span></div>
+              <div class="bay-details"><span class="tiny-label">SIMULATED HARDWARE</span><h3>A place, held ready.</h3><div class="detail-row"><span>Occupancy</span><strong id="occupancy">—</strong></div><div class="detail-row"><span>Barrier</span><strong id="barrier">—</strong></div><div class="detail-row"><span>Plate check</span><strong id="reservation-state">—</strong></div><div class="detail-row"><span>Reservation</span><strong id="reservation-plate">None</strong></div></div>
+            </div>
+            <ol class="journey" aria-label="Reservation journey"><li data-step="reserve"><span>1</span>Reserve</li><li data-step="arrive"><span>2</span>Arrive</li><li data-step="start-charge"><span>3</span>Charge</li><li data-step="depart"><span>4</span>Depart</li><li data-step="release"><span>5</span>Release</li></ol>
+            <form id="reservation-form" class="reservation-form">
+              <div class="form-fields"><label class="field plate-field" for="plate"><span>Demo license plate</span><input id="plate" name="plate" type="text" value="DEMO 42" maxlength="20" required autocomplete="off" spellcheck="false" aria-describedby="plate-hint"></label><label class="field hold-field" for="hold-minutes"><span>Hold duration</span><select id="hold-minutes" name="holdMinutes"><option value="5">5 minutes</option><option value="10" selected>10 minutes</option><option value="15">15 minutes</option><option value="20">20 minutes</option></select></label></div>
+              <p id="plate-hint" class="field-hint">Use a fictional plate. This field is also the simulated arriving plate.</p>
+              <button id="reserve-button" class="button primary reserve-button" type="submit" disabled><span>Reserve demo bay</span><span aria-hidden="true">↗</span></button>
+            </form>
+            <div class="arrival-controls"><label for="confidence">Recognition confidence <span id="confidence-value">99%</span></label><input id="confidence" type="range" min="0" max="1" step="0.01" value="0.99" aria-describedby="confidence-hint"><p class="field-hint" id="confidence-hint">Try a different plate or low confidence to test manual review.</p></div>
+            <div class="action-buttons"><button class="button secondary" data-action="arrive" disabled>Simulate arrival</button><button class="button secondary" data-action="start-charge" disabled>Start charge</button><button class="button secondary" data-action="depart" disabled>Depart</button><button class="button secondary" data-action="release" disabled>Release bay</button></div>
+            <p id="action-status" class="action-status" role="status" aria-live="polite" aria-atomic="true">Connecting to the local simulator…</p>
+          </section>
+        </div>
+
+        <div class="lower-grid">
+          <section id="activity" class="panel activity-panel" aria-labelledby="activity-title"><div class="panel-heading"><div><p class="eyebrow">03 / AUDIT TRAIL</p><h2 id="activity-title">Every step, visible</h2></div><span class="live-marker"><span></span> Local events</span></div><ol id="event-list" class="event-list"></ol><p id="events-empty" class="empty-text">Actions will appear here. Plates are redacted from the timeline.</p></section>
+          <section class="panel operator-panel" aria-labelledby="operator-title"><div class="panel-heading"><div><p class="eyebrow">EDGE CASES</p><h2 id="operator-title">Test the unexpected</h2></div><span aria-hidden="true" class="operator-icon">↔</span></div><p class="muted-text">Practice blocked bays and no-shows before tomorrow’s hardware demo.</p><div class="operator-buttons"><button class="button secondary" data-action="block" disabled>Block bay</button><button class="button secondary" data-action="clear" disabled>Clear bay</button><button class="button secondary" data-action="expire" disabled>Expire hold</button><button class="button text-button" data-action="reset" disabled>Reset simulator ↻</button></div><div class="privacy-note"><strong>Small data footprint</strong><p>Use fictional plates. The local server retains a masked display and keyed fingerprint in memory. Events redact plates. Restarting clears server state.</p></div></section>
+        </div>
+
+        <details id="integration" class="panel integration-panel"><summary><span><span class="eyebrow">ON-SITE INTEGRATION TASK</span><strong>Bring in real charger discovery</strong><span class="summary-description">Optional GoingElectric directory connection · discovery only</span></span><span class="disclosure-icon" aria-hidden="true">+</span></summary><div class="integration-content"><p>Ask mentors for approved API access and browser setup. Directory data does not connect a station to reservation hardware. Requests go directly from your browser to GoingElectric.</p><p class="integration-links"><a href="https://www.goingelectric.de/stromtankstellen/api/docs/" target="_blank" rel="noreferrer">API documentation ↗</a><a href="https://www.goingelectric.de/stromtankstellen/api/terms/" target="_blank" rel="noreferrer">Terms of use ↗</a></p><form id="discovery-form"><div class="directory-fields"><label class="field key-field" for="api-key"><span>GoingElectric API key</span><input id="api-key" type="password" autocomplete="off" spellcheck="false" placeholder="Enter approved API key" required></label><label class="field" for="latitude"><span>Latitude</span><input id="latitude" type="number" min="-90" max="90" step="any" placeholder="e.g. 48.15" required></label><label class="field" for="longitude"><span>Longitude</span><input id="longitude" type="number" min="-180" max="180" step="any" placeholder="e.g. 11.57" required></label><label class="field" for="radius"><span>Radius (km)</span><input id="radius" type="number" min="1" max="50" value="5" required></label></div><p class="field-hint">Key stays in this page’s memory. It is never stored or sent to the local server. No requests run automatically.</p><div class="discovery-actions"><button id="discovery-button" class="button primary" type="submit">Search GoingElectric ↗</button><button id="clear-discovery" class="button secondary" type="button">Clear key & results</button></div></form><p id="discovery-status" class="action-status" role="status" aria-live="polite">No public directory data loaded.</p><div id="directory-attribution" class="directory-attribution" hidden>Public station data: <a href="https://www.goingelectric.de/stromtankstellen/" target="_blank" rel="noreferrer">GoingElectric</a> · <span id="directory-time"></span> · Directory only · Removed after 24 hours</div><div id="directory-results" class="directory-results"></div></div></details>
+        <footer class="page-footer"><span class="footer-brand">BayReady</span><span>Hackathon prototype · Simulated charging & hardware · No real bookings</span><a href="/api/state" target="_blank" rel="noreferrer">Inspect local state ↗</a></footer>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

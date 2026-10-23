@@ -1,0 +1,152 @@
+
+--- PAGE 1 ---
+
+Ecurious Challenge: How to
+Integrate a Smart Reservation
+System in a Charging App for Public
+EV Charging
+— Ecurious
+Build a charging app feature that lets EV drivers reserve a public charge point – and make
+sure the spot is actually free when they arrive. You do not need to be an e-mobility expert.
+The goal is to combine different perspectives—from software and UX to energy systems,
+hardware and business.
+The Setup
+Ecurious provides real reservation hardware installed at a charging bay, controllable via the
+Ecurious server. Your app connects to this server to reserve, release and monitor the bay.
+Public charging data (locations, connectors, power) comes from GoingElectric, one of the
+most comprehensive sources for public charge points in Europe.
+• Reservation hardware: physically keeps the bay free for the driver who booked it
+• Built-in camera: license plate recognition to identify which vehicle is standing in the
+bay
+• Ecurious server: your access point to the hardware (reserve, release, status, plate
+events)
+• GoingElectric: public charging information to build the map and search in your app
+Ecurious Challenge: Smart Reservation for Public EV Charging 1
+
+--- PAGE 2 ---
+
+Your Mission
+Create a working prototype that integrates a smart reservation system into a charging app
+for public EV charging – from finding a charger to arriving at a free bay.
+The core integration (app ↔ Ecurious server ↔ reservation hardware) is mandatory. Then
+choose one or more areas to go deeper:
+• No-Shows: Design how the system handles drivers who reserve but never arrive.
+• Blocked Bays: Decide what happens when a car is already standing in the reserved
+bay.
+• License Plate Recognition: Use the built-in camera to check that the right vehicle
+arrives, release the bay automatically and detect blocking vehicles.
+• Interoperability: Make the reservation accessible to other charging apps and link it
+smartly.
+• New Use Cases: Explore what else the reservation hardware enables – events,
+retail, hotels, fleets and more.
+• Utilisation: Show how reservations can increase utilisation for Charge Point
+Operators (CPOs).
+• Business Case: Develop a business model, including how to price reservations and
+no-shows.
+What to Deliver
+Your team should:
+1. 2. 3. 4. 5. Build a charging app prototype (mobile or web) that shows public charge points
+based on GoingElectric data.
+Connect to the Ecurious server and demonstrate a full reservation cycle on the
+provided hardware: reserve → arrive (vehicle check-in via license plate recognition)
+→ charge → release.
+Document the entire process: architecture, API calls, data flows, design decisions,
+tools used and what did not work.
+Present your answers to at least two of the mission areas above.
+Describe limitations and ideas for scaling the system to other apps, operators and
+locations.
+A polished app is a bonus—not a requirement. We are looking for a thoughtful, well-
+documented and transferable approach.
+Guiding Questions
+Use these questions as inspiration – you do not need to answer all of them.
+No-Shows
+• How long should a reservation be held? Grace period, automatic release, reminders?
+• How do you detect that the driver is not coming (GPS, ETA, check-in)?
+Ecurious Challenge: Smart Reservation for Public EV Charging 2
+
+--- PAGE 3 ---
+
+• How do you price a no-show fairly without scaring drivers away?
+Blocked Bays
+• What if a car is already standing in the bay – a combustion car, an EV not charging,
+or an EV still charging?
+• How does the system detect this (e.g. via the camera), and how is the waiting driver
+informed or re-routed?
+• Who is responsible, and what is the escalation path for the operator?
+License Plate Recognition
+• How do you link a license plate to a reservation – and what if the driver arrives in a
+different car?
+• How can the camera trigger actions automatically, e.g. releasing the bay or starting
+the charging session (plug & charge-like experience)?
+• How do you handle recognition errors: dirt, darkness, foreign or temporary plates?
+• How do you process plate data in a GDPR-compliant way (data minimisation,
+retention, consent)?
+Interoperability
+• How can other charging apps and e-mobility providers access the reservation (e.g.
+open API, OCPI, OCPP)?
+• How do you link it smartly – deep links, roaming platforms, a shared booking
+standard?
+• How is a reservation from app A recognised on site for a driver using app B?
+New Use Cases
+• How can the reservation hardware serve events, retail, hotels, workplaces or fleets?
+• Can a retailer offer reserved charging as a customer benefit or loyalty perk?
+Utilisation
+• How can reservations increase utilisation instead of keeping bays empty?
+• Which data and KPIs show the effect for Charge Point Operators?
+Business Case
+• Who pays: driver, CPO, retailer, app provider?
+• How could a pricing model look – reservation fee, no-show fee, subscription, revenue
+share?
+• What is the value of a guaranteed charging spot for the driver and for the operator?
+Fair Play & Safety
+Only use the hardware and server access provided for the challenge. Do not interfere with
+public or production charging infrastructure. Respect the terms of use of GoingElectric and
+any other data source you use. Treat user, location and license plate data responsibly and in
+line with GDPR.
+Ecurious Challenge: Smart Reservation for Public EV Charging 3
+
+--- PAGE 4 ---
+
+Resources
+• GoingElectric: public charging station directory and API –
+goingelectric.de/stromtankstellen
+• Ecurious server: access credentials and API documentation (provided on site)
+• Reservation hardware: installed test bay at the hackathon venue
+• Standards for inspiration: OCPP (ReserveNow / CancelReservation) and OCPI
+(reservation commands)
+• Ecurious mentors: available throughout the hackathon for questions
+Assessment Criteria
+The jury scores each team on five criteria from 1 (weak) to 5 (excellent). Scores are
+weighted to a total of 100 points. The core integration (full reservation cycle on the Ecurious
+hardware) is a prerequisite for the top ranks.
+Criterion Weight What the jury looks for
+Technical Implementation 30% Working integration of app, Ecurious server and
+hardware; full live reservation cycle; robust handling of
+edge cases (no-show, blocked bay, plate recognition
+errors); code quality.
+Solution Concept &
+Innovation
+20% Smart, original answers to the mission areas; creative
+use of license plate recognition; new use cases beyond
+public charging (events, retail, fleets).
+Interoperability &
+Scalability
+15% How easily other charging apps and operators can
+connect (open API, OCPI/OCPP); transferability to other
+locations and hardware.
+Business Case & CPO
+Value
+20% Plausible pricing for reservations and no-shows; clear
+value for drivers and Charge Point Operators;
+measurable effect on utilisation.
+Documentation & Pitch 15% Complete documentation of the process (architecture,
+API calls, decisions, what did not work); clear, convincing
+live demo and presentation.
+Total 100%
+Tie-breaker: the higher score in Technical Implementation decides. Responsible handling of
+user and license plate data (GDPR) is expected from all teams; clear violations can lead to
+point deductions.
+What You Can Win
+The winning team will receive:
+• €1,000 in prize money
+Ecurious Challenge: Smart Reservation for Public EV Charging 4

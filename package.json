@@ -1,0 +1,17 @@
+{
+  "name": "ecurious-reservation-lab",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A local simulator for preparing the Ecurious charging reservation hackathon demo.",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server.mjs",
+    "dev": "node --watch --env-file-if-exists=.env server.mjs",
+    "test": "node --test",
+    "check": "node --check server.mjs && node --check public/app.js",
+    "doctor": "node --env-file-if-exists=.env scripts/doctor.mjs"
+  }
+}
