@@ -9,6 +9,7 @@ Implementation snapshot: 24 October 2026. The source brief provides challenge re
 - [90-second live demo runbook](DEMO.md)
 - [Three-minute spoken pitch and judge questions](PITCH.md)
 - [Complete current architecture and data flows](SYSTEM-DESIGN.md)
+- [Interactive Swagger UI and OpenAPI specifications](OPENAPI.md)
 - [Business model and assumptions](BUSINESS-MODEL.md)
 
 The current primary demo is **Map → Audimax TUM**, using direct device commands and a thirty-second window. Eventbrite is integrated; the user chose labelled sample events for the presentation because the connected account returned no eligible Munich events. Older backend/durable workflow references describe separate features, not the direct map hold.
@@ -21,7 +22,7 @@ The current primary demo is **Map → Audimax TUM**, using direct device command
 | Run the app, configure services, or diagnose a failure | [Operations](OPERATIONS.md), then [mobile setup](../mobile/README.md) |
 | Understand database tables, transactions and access | [Database design](DATABASE.md) |
 | Apply the hosted Supabase setup | [Supabase setup](SUPABASE.md) |
-| Implement a client or inspect requests and responses | [API reference](API.md) |
+| Implement a client or inspect requests and responses | [API reference](API.md), [Swagger/OpenAPI](OPENAPI.md) |
 | Activate the guarded designated hardware workflow | [Hardware enrollment/setup](HARDWARE-SETUP.md), [blocked bays and no-shows](BAY-LIFECYCLE.md) |
 | Test the selected barrier-only lock with a plate | [lock-0002 app walkthrough](LOCK-0002-WALKTHROUGH.md) |
 | Understand scheduled booking, plate entry, accounts and session duration | [Scheduled sessions](SCHEDULED-SESSIONS.md) |

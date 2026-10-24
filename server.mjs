@@ -12,6 +12,11 @@ import { EventbriteEvents } from './lib/eventbrite-events.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const MAX_BODY_BYTES = 8 * 1024;
+const OPENAPI_FILES = new Map([
+  ['/api/openapi.json', resolve(ROOT, 'docs/openapi.json')],
+  ['/api/openapi-ecurious.json', resolve(ROOT, 'docs/openapi-ecurious.json')],
+]);
+const SWAGGER_PATHS = new Set(['/docs', '/docs/', '/swagger', '/swagger/', '/swagger/index.html']);
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
@@ -67,6 +72,25 @@ export function createServer({ simulator = createSimulator(), simulation = new M
     try {
       // A fixed base avoids trusting the Host header for route parsing.
       const url = new URL(request.url, 'http://127.0.0.1');
+      if (OPENAPI_FILES.has(url.pathname) || SWAGGER_PATHS.has(url.pathname)) {
+        if (request.method !== 'GET' && request.method !== 'HEAD') {
+          json(response, 405, { error: { code: 'METHOD_NOT_ALLOWED', message: 'API documentation supports GET and HEAD.' } }, { Allow: 'GET, HEAD' });
+          return;
+        }
+        const specification = OPENAPI_FILES.get(url.pathname);
+        const content = await readFile(specification ?? resolve(ROOT, 'public/swagger/index.html'));
+        if (!specification) {
+          // Swagger can call either documented service. Credentials remain user-entered.
+          response.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://parking-lock-service-production.up.railway.app; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+        }
+        response.writeHead(200, {
+          'Content-Type': specification ? 'application/json; charset=utf-8' : 'text/html; charset=utf-8',
+          'Content-Length': content.length,
+          'Cache-Control': 'no-store',
+        });
+        response.end(request.method === 'HEAD' ? undefined : content);
+        return;
+      }
       if (url.pathname.startsWith('/api/')) {
         if (request.method === 'GET' && url.pathname === '/api/health') {
           json(response, 200, { healthy: true, mode: 'mock' });

@@ -1,4 +1,4 @@
-import DateTimePicker from '@expo/ui/community/datetime-picker';
+import DateTimePicker from '@/components/date-time-picker';
 import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react';
 import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';

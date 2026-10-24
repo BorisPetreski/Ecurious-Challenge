@@ -1,0 +1,653 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Ecurious assigned test hardware \u2014 BayReady observed integration",
+    "version": "1.0.0",
+    "description": "Separate upstream service used by the BayReady Audimax map demo and the Node read-only adapter. This is a repository-maintained integration subset, not an official Ecurious OpenAPI publication. Contract sources: docs/ECURIOUS-API.md and mobile/src/lib/audimax-lock-api.ts, reviewed 24 October 2026. The direct map flow raises the assigned barrier, installs a plate whitelist, and later clears the whitelist and lowers the barrier. Booking windows, owner allocation and mock fees belong to BayReady; this provider has no documented booking/payment/charging endpoint. All examples are fictional. Requests in this document go directly to the Ecurious service and can operate the assigned test rig."
+  },
+  "servers": [
+    {
+      "url": "https://parking-lock-service-production.up.railway.app",
+      "description": "Ecurious challenge service; assigned lock-0002 is the BayReady barrier-only demo rig"
+    }
+  ],
+  "security": [
+    {
+      "ecuriousQueryKey": []
+    },
+    {
+      "ecuriousHeaderKey": []
+    }
+  ],
+  "externalDocs": {
+    "description": "Ecurious service reference",
+    "url": "https://parking-lock-service-production.up.railway.app/"
+  },
+  "tags": [
+    {
+      "name": "Assigned locks",
+      "description": "Provider-reported telemetry, including potentially historical state and personal data."
+    },
+    {
+      "name": "Camera OCR",
+      "description": "Read the most recent onboard OCR result; a result may predate the active booking."
+    },
+    {
+      "name": "Barrier commands",
+      "description": "Real assigned test-hardware movement requests; acknowledgement and observed movement are separate."
+    },
+    {
+      "name": "Plate access",
+      "description": "Persistent onboard-camera rules for automatic plate-triggered lowering. No provider TTL is documented."
+    }
+  ],
+  "paths": {
+    "/api/v1/locks": {
+      "get": {
+        "tags": [
+          "Assigned locks"
+        ],
+        "operationId": "ecuriousListAssignedLocks",
+        "summary": "List locks assigned to the API key",
+        "description": "The phone accepts either locks or assignedLocks. carPresence is a string, not a carPresent boolean. whitelist and latestPhoto may contain raw plate data; the Node /api/hardware endpoint returns a separate redacted projection.",
+        "responses": {
+          "200": {
+            "description": "Team-scoped assigned locks. Optional telemetry fields may be absent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssignedLocksResponse"
+                },
+                "example": {
+                  "team": "Example team",
+                  "locks": [
+                    {
+                      "id": "lock-0002",
+                      "name": "Assigned barrier-only test rig",
+                      "status": "lowered",
+                      "carPresence": "vacant",
+                      "hasCamera": true,
+                      "lastSeenAt": "2026-10-24T10:00:00.000Z",
+                      "activeErrors": [],
+                      "whitelist": []
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Provider-defined error response (including authentication, assignment, missing lock or device errors). The full error-body contract has not been independently established.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/locks/{lockId}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/lockId"
+        }
+      ],
+      "get": {
+        "tags": [
+          "Assigned locks"
+        ],
+        "operationId": "ecuriousGetAssignedLock",
+        "summary": "Read one assigned lock",
+        "description": "Returns the provider lock object. lastSeenAt is the device observation time; receiving HTTP 200 does not make it current.",
+        "responses": {
+          "200": {
+            "description": "Single assigned lock wrapper.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssignedLockResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Provider-defined error response (including authentication, assignment, missing lock or device errors). The full error-body contract has not been independently established.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/locks/{lockId}/plate/latest": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/lockId"
+        }
+      ],
+      "get": {
+        "tags": [
+          "Camera OCR"
+        ],
+        "operationId": "ecuriousGetLatestRecognizedPlate",
+        "summary": "Retrieve the latest onboard-camera OCR result",
+        "description": "Observed response keys are lockId, timestamp, licensePlate and plateType. No confidence score, event ID or OCR-injection endpoint was observed. A historical result is not proof of a new arrival. The direct Audimax client uses hardware whitelist auto-entry rather than polling this endpoint.",
+        "responses": {
+          "200": {
+            "description": "Latest recognition, potentially historical. Contains personal data.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlateObservation"
+                },
+                "example": {
+                  "lockId": "lock-0002",
+                  "timestamp": "2026-10-24T10:00:00.000Z",
+                  "licensePlate": "DEMO42",
+                  "plateType": "standard"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Observed when no latest recognition is available; an unknown/unassigned lock may also be unavailable. No recognition does not establish vacancy.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Provider-defined error response (including authentication, assignment, missing lock or device errors). The full error-body contract has not been independently established.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/locks/{lockId}/lock": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/lockId"
+        }
+      ],
+      "post": {
+        "tags": [
+          "Barrier commands"
+        ],
+        "operationId": "ecuriousRaiseBarrier",
+        "summary": "Raise the barrier",
+        "description": "The Audimax Reserve flow sends this POST without a JSON body, then sends a separate whitelist POST. These two operations are not atomic. This endpoint changes hardware state; it does not create a BayReady booking. The Node adapter uses the optional documented body instead.",
+        "requestBody": {
+          "required": false,
+          "description": "The current Audimax phone client sends no request body. The separate Node adapter sends the documented optional cancelAutoLift:false object.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MovementOptions"
+              },
+              "example": {
+                "cancelAutoLift": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Command accepted/sent acknowledgement. This is not a sensor-confirmed barrier position.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcknowledgement"
+                },
+                "example": {
+                  "success": true,
+                  "message": "Command sent",
+                  "result": {
+                    "success": true
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Provider-defined error response (including authentication, assignment, missing lock or device errors). The full error-body contract has not been independently established.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/locks/{lockId}/unlock": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/lockId"
+        }
+      ],
+      "post": {
+        "tags": [
+          "Barrier commands"
+        ],
+        "operationId": "ecuriousLowerBarrier",
+        "summary": "Lower the barrier",
+        "description": "The Audimax Leave flow first clears whitelist access, then sends this POST without a JSON body. The two operations are not atomic. HTTP success is a command acknowledgement, not proof of the final arm position.",
+        "requestBody": {
+          "required": false,
+          "description": "The current Audimax phone client sends no request body. The separate Node adapter sends the documented optional cancelAutoLift:false object.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MovementOptions"
+              },
+              "example": {
+                "cancelAutoLift": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Command accepted/sent acknowledgement. This is not a sensor-confirmed barrier position.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcknowledgement"
+                },
+                "example": {
+                  "success": true,
+                  "message": "Command sent",
+                  "result": {
+                    "success": true
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Provider-defined error response (including authentication, assignment, missing lock or device errors). The full error-body contract has not been independently established.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/locks/{lockId}/whitelist": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/lockId"
+        }
+      ],
+      "post": {
+        "tags": [
+          "Plate access"
+        ],
+        "operationId": "ecuriousReplacePlateWhitelist",
+        "summary": "Replace plate access rules; use plates:[] to clear",
+        "description": "The current phone flow sends a list of profile plates after raising and sends plates:[] before lowering. The documented camera stores up to ten entries and automatically lowers for a matching plate. wildcard:true is documented by the provider; normal BayReady demo reservations install a specific plate. Rules are persistent, with no documented per-booking expiry or rollback. This configures future access; it does not inject an OCR observation.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WhitelistRequest"
+              },
+              "examples": {
+                "specificPlate": {
+                  "summary": "Fictional test plate",
+                  "value": {
+                    "plates": [
+                      "DEMO42"
+                    ]
+                  }
+                },
+                "clearAccess": {
+                  "summary": "Disable automatic plate entry",
+                  "value": {
+                    "plates": []
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Provider acknowledgement with whitelist echo; not an independent hardware readback.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WhitelistAcknowledgement"
+                },
+                "example": {
+                  "success": true,
+                  "message": "Whitelist updated",
+                  "whitelist": [
+                    "DEMO42"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Provider-defined error response (including authentication, assignment, missing lock or device errors). The full error-body contract has not been independently established.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "ecuriousQueryKey": {
+        "type": "apiKey",
+        "in": "query",
+        "name": "apiKey",
+        "description": "Team API key. The current Expo Audimax client uses this query parameter. Enter locally in Authorize; no key is embedded in this specification."
+      },
+      "ecuriousHeaderKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key",
+        "description": "Documented alternative used by the Node Ecurious adapter. Supply either query or header authentication."
+      }
+    },
+    "parameters": {
+      "lockId": {
+        "name": "lockId",
+        "in": "path",
+        "required": true,
+        "description": "Currently assigned hardware ID. lock-0002 is the designated BayReady barrier-only demo.",
+        "schema": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_-]{1,100}$"
+        },
+        "example": "lock-0002"
+      }
+    },
+    "schemas": {
+      "AssignedLocksResponse": {
+        "type": "object",
+        "description": "The provider list uses locks; the participant dashboard and phone also tolerate assignedLocks. At least one array is needed by the integration.",
+        "properties": {
+          "team": {
+            "type": "string"
+          },
+          "locks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Lock"
+            }
+          },
+          "assignedLocks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Lock"
+            }
+          }
+        },
+        "anyOf": [
+          {
+            "required": [
+              "locks"
+            ]
+          },
+          {
+            "required": [
+              "assignedLocks"
+            ]
+          }
+        ],
+        "additionalProperties": true
+      },
+      "AssignedLockResponse": {
+        "type": "object",
+        "required": [
+          "lock"
+        ],
+        "properties": {
+          "lock": {
+            "$ref": "#/components/schemas/Lock"
+          }
+        },
+        "additionalProperties": true
+      },
+      "Lock": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "description": "Observed integration fields. Optional/missing/unfamiliar telemetry must remain unknown; fields and status values are not claimed exhaustive.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "lock-0002"
+          },
+          "name": {
+            "type": "string"
+          },
+          "serialHex": {
+            "type": "string"
+          },
+          "hasCamera": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "description": "Observed/documented values include raised, lowered, raising, lowering and offline. This is barrier telemetry, not reservation status.",
+            "example": "lowered"
+          },
+          "carPresence": {
+            "type": "string",
+            "description": "Known string values are vacant and occupied; do not coerce this string into a boolean.",
+            "example": "vacant"
+          },
+          "battery12V": {
+            "type": "number",
+            "nullable": true
+          },
+          "battery3_7V": {
+            "type": "number",
+            "nullable": true
+          },
+          "signalStrength4G": {
+            "type": "number",
+            "nullable": true,
+            "description": "Provider signal value; no scale contract established."
+          },
+          "waterIngress": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "activeErrors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "lastSeenAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "Last provider device observation, not the HTTP fetch time."
+          },
+          "whitelist": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "May contain personal data and the wildcard marker *. No automatic expiry is established."
+          },
+          "latestPhoto": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "timestamp": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "licensePlate": {
+                "type": "string",
+                "description": "Raw recognized plate; personal data."
+              },
+              "plateType": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": true
+      },
+      "PlateObservation": {
+        "type": "object",
+        "required": [
+          "lockId",
+          "timestamp",
+          "licensePlate"
+        ],
+        "properties": {
+          "lockId": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "licensePlate": {
+            "type": "string",
+            "description": "Raw OCR plate; fictional examples only."
+          },
+          "plateType": {
+            "type": "string",
+            "description": "Observed example: standard."
+          }
+        },
+        "additionalProperties": true
+      },
+      "MovementOptions": {
+        "type": "object",
+        "properties": {
+          "cancelAutoLift": {
+            "type": "boolean",
+            "description": "Provider option; true disables the documented automatic relift timeout. Duration and complete interactions are not established. The Node adapter sends false."
+          }
+        },
+        "additionalProperties": true
+      },
+      "CommandAcknowledgement": {
+        "type": "object",
+        "description": "Subset from documented command examples. The Node adapter requires both success and result.success to be true. The direct phone currently checks HTTP success only.",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "success": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": true
+      },
+      "WhitelistRequest": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "plates"
+            ],
+            "properties": {
+              "plates": {
+                "type": "array",
+                "maxItems": 10,
+                "items": {
+                  "type": "string"
+                },
+                "description": "Use one specific plate for a BayReady reservation, or an empty array to disable plate-triggered entry."
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": [
+              "wildcard"
+            ],
+            "properties": {
+              "wildcard": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ],
+                "description": "Provider-documented any-plate access, separate from the normal specific-plate reservation flow."
+              }
+            },
+            "additionalProperties": false
+          }
+        ]
+      },
+      "WhitelistAcknowledgement": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          },
+          "whitelist": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  }
+}

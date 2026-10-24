@@ -6,6 +6,8 @@ BayReady is an Android-first Expo prototype for the Ecurious WATT THE HACK chall
 
 **Start with the working map demo below.** [90-second demo guide](docs/DEMO.md) · [Three-minute pitch](docs/PITCH.md) · [Setup and frameworks](docs/SETUP.md) · [Complete system design](docs/SYSTEM-DESIGN.md)
 
+**Interactive API docs:** open `/docs` on the running Node server, e.g. [localhost:3001/docs](http://localhost:3001/docs) when using `PORT=3001`. Swagger UI includes backend and Ecurious specifications, examples, authentication and executable requests. [OpenAPI guide](docs/OPENAPI.md) · [Backend specification](docs/openapi.json) · [Ecurious specification](docs/openapi-ecurious.json).
+
 ## Run it
 
 Requires **Node.js 24+**, npm, and **Expo Go on Android**. From this repository:

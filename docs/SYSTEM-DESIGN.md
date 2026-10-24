@@ -4,6 +4,8 @@ This describes the implementation pulled in commit `05b7986` on 24 October 2026,
 
 Use [README.md](../README.md) for startup and the simple demo, [API.md](API.md) for wire contracts, [DATABASE.md](DATABASE.md) for tables/transactions, and [BUILD-LOG.md](BUILD-LOG.md) for dated observations. Code availability, HTTP acceptance, device reports and an observed complete customer cycle are different kinds of evidence. The user reports that the pulled app path works; this document does not manufacture additional camera, charging or reliability evidence.
 
+The Node server also hosts **Swagger UI at `/docs`**, with separate [backend](openapi.json) and [Ecurious upstream](openapi-ecurious.json) OpenAPI 3.0.3 documents. Locally served UI assets work without a CDN; the backend specification uses the same origin, while Ecurious operations retain their own provider URL and authentication. See [OPENAPI.md](OPENAPI.md) for usage and the boundaries around direct Supabase/GoingElectric services.
+
 ## Product and current capabilities
 
 BayReady connects charger discovery to a reservation and vehicle access experience. It addresses the gap between finding a charger on a map and having access to its parking bay on arrival. The challenge requires app ↔ Ecurious server ↔ designated hardware integration; public directory software holds alone do not meet that requirement. The [source brief](../source/challenge-brief.txt) defines the deliverables and judging criteria.

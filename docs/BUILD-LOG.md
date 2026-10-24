@@ -1,5 +1,13 @@
 # Build log and submission evidence
 
+## 24 October 2026 — OpenAPI specifications and local Swagger UI
+
+- Added OpenAPI 3.0.3 documents for all **17 backend operations across 15 paths**, with 50 reusable schemas, JSON examples, errors, mock pricing and separate Supabase/recognition authentication. A second document covers **six observed Ecurious upstream operations**, including the direct map raise → whitelist → clear → lower sequence. Provider telemetry variants and unknown error details remain labelled rather than invented.
+- Hosted Swagger UI 5.34.0 at `/docs` (also `/swagger`) and the JSON contracts at `/api/openapi.json` and `/api/openapi-ecurious.json`. Official npm distribution assets and Apache LICENSE/NOTICE are served locally; no CDN or external validator is required. User-entered authorization is not persisted. The UI supports same-origin backend requests and the documented Railway upstream, subject to provider CORS.
+- Added a usage guide, simulator walkthrough, importable JSON downloads and links from the README, documentation index, API reference and system design. Direct GoingElectric and Supabase client APIs remain separate services rather than fabricated Node routes. Audimax hardware behavior, database schema, bookings and payments were unchanged.
+- Restarted the existing local Node API on **3001** and verified HTTP 200 for the live Swagger page and backend specification. Verification uses isolated simulated inputs; no hardware command, new reservation in the hosted database, payment, commit or push was requested by this documentation task.
+- Four focused documentation HTTP/contract tests passed; both documents passed Swagger Parser 12.1.0 validation, and fourteen isolated mock/unconfigured request-response pairs passed schema validation. Validation caught and corrected nullable enum constraints for scenario IDs and slot payment state. Temporary validation dependencies stayed outside the repository. JavaScript syntax and whitespace checks passed; no browser runtime was available for a rendered visual check.
+
 ## 24 October 2026 — pulled demo documentation and Eventbrite feed
 
 - Reviewed pulled `05b7986` and documented its actual primary Map/Audimax direct-command flow, 30-second presentation timing, native whitelist entry, local holds/foreground timers and manual Leave Bay. Kept separate the shared Supabase booking path, older durable hardware/session path and fictional scenario lab.

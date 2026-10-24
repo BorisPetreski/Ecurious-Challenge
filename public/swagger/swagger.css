@@ -1,0 +1,17 @@
+body { margin: 0; background: #f6f8fb; color: #17213a; font-family: system-ui, sans-serif; }
+.bayready-header { max-width: 1420px; margin: 0 auto; padding: 30px 30px 14px; display: flex; gap: 24px; align-items: center; justify-content: space-between; }
+.bayready-eyebrow { color: #6045bf; font-size: 11px; font-weight: 800; letter-spacing: .12em; }
+.bayready-header h1 { margin: 8px 0; font-size: 30px; letter-spacing: -.03em; }
+.bayready-header p, .bayready-context { color: #526079; line-height: 1.55; font-size: 14px; }
+.bayready-header nav { display: flex; gap: 10px; flex-wrap: wrap; flex-shrink: 0; }
+.bayready-header a { color: #5130b3; font-weight: 700; text-decoration: none; border: 1px solid #d9d1ed; background: #fff; padding: 10px 14px; border-radius: 9px; font-size: 13px; }
+.bayready-context { max-width: 1420px; padding: 0 30px; margin: 0 auto 20px; }
+.swagger-ui .topbar { background: #17213a; padding: 12px 0; }
+.swagger-ui .topbar .topbar-wrapper > a { display: none; }
+.swagger-ui .topbar .download-url-wrapper { margin: 0; }
+.swagger-ui .info { margin: 28px 0; }
+.swagger-ui .scheme-container { border-radius: 10px; }
+.swagger-ui .opblock { border-radius: 9px; }
+.swagger-ui .btn.authorize { color: #5130b3; border-color: #5130b3; }
+.swagger-ui .btn.authorize svg { fill: #5130b3; }
+@media (max-width: 720px) { .bayready-header { align-items: flex-start; flex-direction: column; padding: 24px 20px 12px; } .bayready-context { padding: 0 20px; } }

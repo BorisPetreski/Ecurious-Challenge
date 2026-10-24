@@ -1,5 +1,7 @@
 # API contracts
 
+Interactive schemas, examples and executable requests are available at **`/docs`** on the Node server. See [the Swagger/OpenAPI guide](OPENAPI.md), [backend OpenAPI JSON](openapi.json), and [separate observed Ecurious OpenAPI JSON](openapi-ecurious.json). Direct Ecurious operations use the upstream server, not the Node `/api/*` namespace.
+
 This reference describes the checked-in implementation. The primary presentation flow is the direct **Map → Audimax** integration added in `05b7986`; its request and local-state contract is below. The longer-lived Node/Supabase reservation contracts remain separate.
 
 ## Current Audimax map demo

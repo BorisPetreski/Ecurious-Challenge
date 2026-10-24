@@ -1,0 +1,3475 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "BayReady — Local Backend API",
+    "version": "0.1.0",
+    "description": "API reference generated from the checked-in Node server and service contracts for the Ecurious WATT THE HACK prototype.\n\nThe simulator, fictional multi-car lab and durable registered-hardware workflow are separate state domains. The current Map → Audimax demo calls Ecurious directly from the phone and does not use these Node booking routes. GoingElectric directory lookup, Supabase Auth/directory software holds and direct Ecurious endpoints are external integrations, not local /api endpoints.\n\nPOST bodies are JSON objects, limited to 8 KiB. All JSON responses use Cache-Control: no-store. Known paths reject unsupported methods with 405 + Allow; unknown /api paths return 404. No browser CORS layer is configured. Simulator/lab/diagnostic routes are shared laptop-development endpoints without user isolation.\n\nHardware writes require configured/enrolled registered inventory and appropriate credentials. HTTP 202 represents durable application intent, not confirmed physical movement. Reconcile GET state after an ambiguous mutation; do not blindly repeat an uncertain command. Test data examples are fictional and all prices/payments are mock. Hardware is a barrier-only test rig; no real EV charging or GDPR/OCPI/OCPP certification is claimed.\n\nUse the Authorize button only with your Supabase user access JWT for user routes, or the separate private recognition token for the callback. Do not enter a service-role key, provider API key or actual plate in a recorded/shared demo. Swagger authorization is not persisted."
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "This BayReady Node server (same origin as Swagger UI)."
+    }
+  ],
+  "tags": [
+    {
+      "name": "Status",
+      "description": "Process availability only."
+    },
+    {
+      "name": "Simulator",
+      "description": "Independent in-memory single-bay reservation/charging simulation. No physical hardware."
+    },
+    {
+      "name": "Multi-car lab",
+      "description": "Independent fictional world for races, no-shows, matching and fallback rehearsals."
+    },
+    {
+      "name": "Events",
+      "description": "Backend-only Eventbrite organization/curated public event feed; explicit mobile demo fallback."
+    },
+    {
+      "name": "Hardware observations",
+      "description": "Redacted, read-only assigned-device telemetry."
+    },
+    {
+      "name": "Hardware workflow",
+      "description": "Legacy authenticated immediate/manual whole-bay reservation intents with durable worker dispatch."
+    },
+    {
+      "name": "Scheduled hardware slots",
+      "description": "Authenticated plate-bound registered-bay arrival windows, mock quotes/extensions/refunds."
+    },
+    {
+      "name": "Plate integration",
+      "description": "Private recognition-service handoff, separate from native whitelist matching in the direct Audimax demo."
+    }
+  ],
+  "paths": {
+    "/api/health": {
+      "get": {
+        "tags": [
+          "Status"
+        ],
+        "operationId": "getHealth",
+        "summary": "Check that the local API is responding",
+        "description": "Process health only. Does not check hardware, database, Eventbrite, GoingElectric or readiness.",
+        "responses": {
+          "200": {
+            "description": "Successful result. ",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                },
+                "example": {
+                  "healthy": true,
+                  "mode": "mock"
+                }
+              }
+            }
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/state": {
+      "get": {
+        "tags": [
+          "Simulator"
+        ],
+        "operationId": "getSimulatorState",
+        "summary": "Read the single-bay simulator",
+        "description": "Reconciles simulated hold expiry when read. This state is independent from every Supabase reservation and the direct Audimax map demo.",
+        "responses": {
+          "200": {
+            "description": "Successful result. ",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReservationState"
+                }
+              }
+            }
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/reservations": {
+      "post": {
+        "tags": [
+          "Simulator"
+        ],
+        "operationId": "createSimulatorReservation",
+        "summary": "Reserve the simulated bay",
+        "description": "Creates one shared in-memory hold and raises only the virtual barrier. No identity, charging hardware or real payment is involved.",
+        "responses": {
+          "201": {
+            "description": "Successful result. ",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReservationState"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMedia"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "description": "JSON object, at most 8 KiB. Send Content-Type: application/json.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SimulatorReservationRequest"
+              },
+              "examples": {
+                "fictionalPlate": {
+                  "summary": "Reserve for ten minutes in the simulator",
+                  "value": {
+                    "plate": "M-DEMO-42",
+                    "holdMinutes": 10
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/actions": {
+      "post": {
+        "tags": [
+          "Simulator"
+        ],
+        "operationId": "applySimulatorAction",
+        "summary": "Advance a simulated reservation lifecycle",
+        "description": "Arrive, start-charge, depart, release, block, clear, expire and reset affect only the simulator. Reset discards the shared simulator reservation and event history.",
+        "responses": {
+          "200": {
+            "description": "Successful result. ",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReservationState"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMedia"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "description": "JSON object, at most 8 KiB. Send Content-Type: application/json.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SimulatorActionRequest"
+              },
+              "examples": {
+                "arrive": {
+                  "summary": "Recognize the fictional reserved car",
+                  "value": {
+                    "action": "arrive",
+                    "plate": "M-DEMO-42",
+                    "confidence": 0.99
+                  }
+                },
+                "charge": {
+                  "summary": "Start simulated charging",
+                  "value": {
+                    "action": "start-charge"
+                  }
+                },
+                "depart": {
+                  "summary": "Simulate departure",
+                  "value": {
+                    "action": "depart"
+                  }
+                },
+                "reset": {
+                  "summary": "Reset the simulator",
+                  "value": {
+                    "action": "reset"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/events": {
+      "get": {
+        "tags": [
+          "Events"
+        ],
+        "operationId": "listEvents",
+        "summary": "Read the Eventbrite organization/curated feed",
+        "description": "Backend-only private token. Lists public, in-person, live/started, not-ended events with valid venues within 50 km of Munich. Shared 60-second cache; bounded provider reads. Expected configuration/provider failures use HTTP 200 with reason and events:[]. No global city search, ticket purchase or event write. Fictional presentation samples belong to the mobile UI, not this live endpoint.",
+        "responses": {
+          "200": {
+            "description": "Successful result. ",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventFeed"
+                },
+                "example": {
+                  "configured": false,
+                  "source": "eventbrite",
+                  "scope": "not_configured",
+                  "fetchedAt": "2026-10-24T12:00:00.000Z",
+                  "reason": "Eventbrite is not configured.",
+                  "events": []
+                }
+              }
+            }
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/simulation": {
+      "get": {
+        "tags": [
+          "Multi-car lab"
+        ],
+        "operationId": "getLab",
+        "summary": "Read the fictional multi-car world",
+        "description": "Three fictional cars and three fictional physical bays across two locations. No real command, plate, payment or database request.",
+        "responses": {
+          "200": {
+            "description": "Successful result. ",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LabSnapshot"
+                }
+              }
+            }
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/simulation/actions": {
+      "post": {
+        "tags": [
+          "Multi-car lab"
+        ],
+        "operationId": "applyLabAction",
+        "summary": "Run a rehearsal scenario or individual lab action",
+        "description": "Scenarios reset the world and exercise two-driver contention, plate matching, no-show, extension, scheduled protection, blocked-bay fallback and full-location mock refund. Individual reserve/observe/scan/park/depart actions separate command acknowledgement from sensor observation. The fictional clock can advance 1–180 minutes per request, with a total seven-day bound.",
+        "responses": {
+          "200": {
+            "description": "Successful result. ",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LabSnapshot"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMedia"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "description": "JSON object, at most 8 KiB. Send Content-Type: application/json.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LabActionRequest"
+              },
+              "examples": {
+                "race": {
+                  "summary": "Rehearse two cars competing for one bay",
+                  "value": {
+                    "action": "scenario",
+                    "scenarioId": "race"
+                  }
+                },
+                "plate": {
+                  "summary": "Rehearse plate matching and separate observation",
+                  "value": {
+                    "action": "scenario",
+                    "scenarioId": "plate-check"
+                  }
+                },
+                "schedule": {
+                  "summary": "Rehearse the 14:50–15:10 protection window",
+                  "value": {
+                    "action": "scenario",
+                    "scenarioId": "scheduled-window"
+                  }
+                },
+                "reserve": {
+                  "summary": "Reserve as fictional Car A",
+                  "value": {
+                    "action": "reserve",
+                    "carId": "car-a",
+                    "bayId": "bay-1",
+                    "bookingMode": "now"
+                  }
+                },
+                "observe": {
+                  "summary": "Confirm a pending simulated movement",
+                  "value": {
+                    "action": "observe",
+                    "bayId": "bay-1"
+                  }
+                },
+                "advance": {
+                  "summary": "Advance only the lab clock",
+                  "value": {
+                    "action": "advance",
+                    "minutes": 10
+                  }
+                },
+                "reset": {
+                  "summary": "Reset the lab world",
+                  "value": {
+                    "action": "reset"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/hardware": {
+      "get": {
+        "tags": [
+          "Hardware observations"
+        ],
+        "operationId": "getHardwareSnapshot",
+        "summary": "Read assigned Ecurious lock diagnostics",
+        "description": "Read-only server-side provider request. Without ECURIOUS_API_KEY returns configured:false and no network call. Configured failures return errors, rather than implying no assigned locks. Device data is redacted. Freshness is a local display rule. This route performs no movement.",
+        "responses": {
+          "200": {
+            "description": "Successful result. ",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HardwareSnapshot"
+                }
+              }
+            }
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/Timeout"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/hardware/bookings": {
+      "get": {
+        "tags": [
+          "Hardware workflow"
+        ],
+        "operationId": "getHardwareWorkflows",
+        "summary": "Read designated physical-bay workflows",
+        "description": "When disabled, public read returns commandsEnabled:false with empty workflows/observations. When configured, a valid Supabase user JWT is required; the result contains owner-aware durable state and separate assigned-device observations. Observation failure may return reason:HARDWARE_OBSERVATION_UNAVAILABLE while retaining workflows.",
+        "responses": {
+          "200": {
+            "description": "Successful result. ",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HardwareWorkflowSnapshot"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/Timeout"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {},
+          {
+            "supabaseBearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Hardware workflow"
+        ],
+        "operationId": "createHardwareReservation",
+        "summary": "Request a legacy immediate hardware reservation",
+        "description": "Requires activated enrolled inventory, assigned-lock allowlist, Supabase session and ownership. A connector selection reserves the entire one-vehicle bay. Commits durable intent and asynchronously schedules worker dispatch; HTTP 202 does not establish a raised barrier. The public client supplies registered UUIDs, never an executable lock ID. Example UUIDs are fictional: replace using GET workflow data.",
+        "responses": {
+          "202": {
+            "description": "Successful result. Application intent accepted; no claim that physical movement completed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HardwareWorkflowSnapshot"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMedia"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/Timeout"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "description": "JSON object, at most 8 KiB. Send Content-Type: application/json.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HardwareReservationRequest"
+              },
+              "examples": {
+                "immediate": {
+                  "summary": "Use actual registered IDs before sending",
+                  "value": {
+                    "bayId": "11111111-1111-4111-8111-111111111111",
+                    "connectorId": "22222222-2222-4222-8222-222222222222",
+                    "holdMinutes": 10,
+                    "requestId": "33333333-3333-4333-8333-333333333333"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "supabaseBearer": []
+          }
+        ]
+      }
+    },
+    "/api/hardware/actions": {
+      "post": {
+        "tags": [
+          "Hardware workflow"
+        ],
+        "operationId": "requestHardwareAction",
+        "summary": "Request owner entry or reservation cleanup",
+        "description": "Entry/release intent for the owner of a legacy immediate reservation. Plate-bound scheduled bookings require trusted plate recognition for entry. Release remains pending until cleanup is confirmed. Configuration is checked before bearer authentication.",
+        "responses": {
+          "202": {
+            "description": "Successful result. Application intent accepted; no claim that physical movement completed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HardwareWorkflowSnapshot"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMedia"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/Timeout"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "description": "JSON object, at most 8 KiB. Send Content-Type: application/json.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HardwareActionRequest"
+              },
+              "examples": {
+                "entry": {
+                  "summary": "Owner requests legacy entry",
+                  "value": {
+                    "action": "entry",
+                    "bayId": "11111111-1111-4111-8111-111111111111",
+                    "reservationId": "44444444-4444-4444-8444-444444444444"
+                  }
+                },
+                "release": {
+                  "summary": "Owner requests cleanup/release",
+                  "value": {
+                    "action": "release",
+                    "bayId": "11111111-1111-4111-8111-111111111111",
+                    "reservationId": "44444444-4444-4444-8444-444444444444"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "supabaseBearer": []
+          }
+        ]
+      }
+    },
+    "/api/hardware/quote": {
+      "post": {
+        "tags": [
+          "Scheduled hardware slots"
+        ],
+        "operationId": "quoteHardwareSlot",
+        "summary": "Quote a Now or scheduled mock arrival window",
+        "description": "Public calculation works even without configured hardware. Current Node accepts a ten-minute or thirty-second duration, within the next seven days (one-minute clock tolerance). Now begins within one minute; scheduled protection starts ten minutes before arrival, no earlier than current server time. Now fixed fee is 0; scheduled fixed fee is 100 EUR cents. All fees are mock. Example timestamps must be updated before Try it out.",
+        "responses": {
+          "200": {
+            "description": "Successful result. ",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HardwareQuote"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMedia"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "description": "JSON object, at most 8 KiB. Send Content-Type: application/json.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuoteRequest"
+              },
+              "examples": {
+                "scheduled": {
+                  "summary": "Update timestamps to your chosen future arrival",
+                  "value": {
+                    "startsAt": "2026-10-24T13:00:00.000Z",
+                    "endsAt": "2026-10-24T13:10:00.000Z",
+                    "bookingMode": "scheduled"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/hardware/slots": {
+      "get": {
+        "tags": [
+          "Scheduled hardware slots"
+        ],
+        "operationId": "listHardwareSlots",
+        "summary": "Read registered hardware time slots",
+        "description": "Without bayId returns this user’s hardware slots. With bayId lists its schedule from one day ago through the next seven days, redacting non-owner personal details. Disabled configuration returns configured:false without requiring auth; activated reads require Supabase JWT. Only a fresh successful scoped read can establish no software hold in that scope. A missing hold never proves physical vacancy.",
+        "responses": {
+          "200": {
+            "description": "Successful result. ",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HardwareSlotSnapshot"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/Timeout"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {},
+          {
+            "supabaseBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "bayId",
+            "in": "query",
+            "required": false,
+            "description": "Registered hardware bay UUID. Omit to list this authenticated user’s slots.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Scheduled hardware slots"
+        ],
+        "operationId": "createHardwareSlot",
+        "summary": "Book a plate-bound arrival window",
+        "description": "Uses authenticated registered inventory, whole-bay conflict handling and an idempotency UUID. Stores a keyed plate fingerprint and masked suffix rather than the raw plate in SQL. Scheduled protection is activated by the backend near the arrival window; same-location reassignment and mock refund/nearby alternatives are represented in slot state. HTTP 202 acknowledges intent, not protection. Actual database allocation may reject a quote because inventory or timing changed. This is separate from the direct Audimax local 30-second hold.",
+        "responses": {
+          "202": {
+            "description": "Successful result. Application intent accepted; no claim that physical movement completed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HardwareSlotSnapshot"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMedia"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/Timeout"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "description": "JSON object, at most 8 KiB. Send Content-Type: application/json.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HardwareSlotRequest"
+              },
+              "examples": {
+                "scheduled": {
+                  "summary": "Replace UUIDs and timestamps before sending",
+                  "value": {
+                    "bayId": "11111111-1111-4111-8111-111111111111",
+                    "connectorId": "22222222-2222-4222-8222-222222222222",
+                    "requestId": "33333333-3333-4333-8333-333333333333",
+                    "startsAt": "2026-10-24T13:00:00.000Z",
+                    "endsAt": "2026-10-24T13:10:00.000Z",
+                    "licensePlate": "M-DEMO-42",
+                    "bookingMode": "scheduled"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "supabaseBearer": []
+          }
+        ]
+      }
+    },
+    "/api/hardware/slots/cancel": {
+      "post": {
+        "tags": [
+          "Scheduled hardware slots"
+        ],
+        "operationId": "cancelHardwareSlot",
+        "summary": "Cancel an owned hardware time slot",
+        "description": "Creates owner cancellation/cleanup intent. Physical inventory is not declared available until required cleanup is confirmed. Read the returned schedule and workflow to reconcile pending/uncertain state.",
+        "responses": {
+          "202": {
+            "description": "Successful result. Application intent accepted; no claim that physical movement completed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HardwareSlotSnapshot"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMedia"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/Timeout"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "description": "JSON object, at most 8 KiB. Send Content-Type: application/json.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SlotCancelRequest"
+              },
+              "examples": {
+                "cancel": {
+                  "summary": "Cancel one owned slot",
+                  "value": {
+                    "slotId": "44444444-4444-4444-8444-444444444444"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "supabaseBearer": []
+          }
+        ]
+      }
+    },
+    "/api/hardware/slots/extend": {
+      "post": {
+        "tags": [
+          "Scheduled hardware slots"
+        ],
+        "operationId": "extendHardwareSlot",
+        "summary": "Add ten minutes for a €1 mock fee",
+        "description": "Requests an idempotent ten-minute extension of an eligible owned reservation. Another booking’s protection window or a closed/arrived reservation can cause conflict. No real card charge is performed. Reconcile after an uncertain response before sending another logical extension.",
+        "responses": {
+          "202": {
+            "description": "Successful result. Application intent accepted; no claim that physical movement completed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HardwareSlotSnapshot"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMedia"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/Timeout"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "description": "JSON object, at most 8 KiB. Send Content-Type: application/json.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SlotExtensionRequest"
+              },
+              "examples": {
+                "extend": {
+                  "summary": "Extend one owned slot with a request UUID",
+                  "value": {
+                    "slotId": "44444444-4444-4444-8444-444444444444",
+                    "requestId": "33333333-3333-4333-8333-333333333333"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "supabaseBearer": []
+          }
+        ]
+      }
+    },
+    "/api/integrations/plate-recognition": {
+      "post": {
+        "tags": [
+          "Plate integration"
+        ],
+        "operationId": "recognizeVehiclePlate",
+        "summary": "Submit a trusted recognition-service event",
+        "description": "Separate backend integration credential, not a Supabase user JWT or Ecurious device key. Only accepts the five documented fields and an allowlisted lock. Event must be at most 15 seconds old and not future-dated. Confidence below 0.9 is accepted as non-matching. A match must belong to an active plate-bound slot and be newer than confirmed protection; device assignment/status is checked before a durable entry request. This endpoint is distinct from the current direct Audimax native-whitelist demo, which does not call this route.",
+        "responses": {
+          "202": {
+            "description": "Successful result. Application intent accepted; no claim that physical movement completed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlateRecognitionResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMedia"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "$ref": "#/components/responses/Timeout"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "description": "JSON object, at most 8 KiB. Send Content-Type: application/json.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlateRecognitionRequest"
+              },
+              "examples": {
+                "recognition": {
+                  "summary": "Fictional plate event; update observedAt immediately before sending",
+                  "value": {
+                    "lockId": "lock-0002",
+                    "eventId": "33333333-3333-4333-8333-333333333333",
+                    "observedAt": "2026-10-24T12:50:01.000Z",
+                    "licensePlate": "M-DEMO-42",
+                    "confidence": 0.99
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "visionBearer": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "supabaseBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Supabase user access token, including an authenticated guest session. Supabase verifies identity/ownership. Enter the JWT without the Bearer prefix; never use a secret/service-role key."
+      },
+      "visionBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Private BAYREADY_VISION_TOKEN for recognition service only (32–256 URL-safe characters). This is not a user JWT or Ecurious key. Enter token without the Bearer prefix."
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "description": "Stable machine-readable failure code; this list is intentionally extensible."
+              },
+              "message": {
+                "type": "string",
+                "description": "Sanitized explanation suitable for display."
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ]
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "Health": {
+        "type": "object",
+        "properties": {
+          "healthy": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "mock"
+            ]
+          }
+        },
+        "required": [
+          "healthy",
+          "mode"
+        ]
+      },
+      "Event": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "type": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "at",
+          "type",
+          "message"
+        ]
+      },
+      "SimulatorPlate": {
+        "type": "string",
+        "minLength": 2,
+        "maxLength": 20,
+        "pattern": "^[a-zA-Z0-9 -]+$",
+        "example": "M-DEMO-42",
+        "description": "Fictional test plate. After removing spaces/hyphens, 2–12 ASCII letters or digits; matching ignores case. Never returned as raw text in simulator state."
+      },
+      "SimulatorReservationRequest": {
+        "type": "object",
+        "properties": {
+          "plate": {
+            "$ref": "#/components/schemas/SimulatorPlate"
+          },
+          "holdMinutes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30,
+            "default": 10
+          }
+        },
+        "required": [
+          "plate"
+        ]
+      },
+      "SimulatorArrivalAction": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "arrive"
+            ]
+          },
+          "plate": {
+            "$ref": "#/components/schemas/SimulatorPlate"
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.99
+          }
+        },
+        "required": [
+          "action",
+          "plate"
+        ]
+      },
+      "SimulatorOtherAction": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "start-charge",
+              "depart",
+              "release",
+              "block",
+              "clear",
+              "expire",
+              "reset"
+            ]
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "SimulatorActionRequest": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/SimulatorArrivalAction"
+          },
+          {
+            "$ref": "#/components/schemas/SimulatorOtherAction"
+          }
+        ],
+        "description": "All actions affect the independent in-memory simulator only. Arrive requires a matching fictional plate with confidence at least 0.9 for authorization; low confidence/mismatch enters manual review. Start-charge simulates a state, without EVSE power telemetry. Expire advances only the simulator clock."
+      },
+      "SimulatorReservation": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "awaiting-arrival",
+              "manual-review",
+              "authorized",
+              "charging",
+              "completed",
+              "expired-occupied"
+            ]
+          },
+          "maskedPlate": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "arrivedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reviewReason": {
+            "type": "string",
+            "enum": [
+              "low-confidence",
+              "plate-mismatch"
+            ]
+          }
+        },
+        "nullable": true,
+        "required": [
+          "id",
+          "status",
+          "maskedPlate",
+          "createdAt",
+          "expiresAt"
+        ]
+      },
+      "SimulatorCapabilities": {
+        "type": "object",
+        "properties": {
+          "canReserve": {
+            "type": "boolean"
+          },
+          "canArrive": {
+            "type": "boolean"
+          },
+          "canStartCharge": {
+            "type": "boolean"
+          },
+          "canDepart": {
+            "type": "boolean"
+          },
+          "canRelease": {
+            "type": "boolean"
+          },
+          "canBlock": {
+            "type": "boolean"
+          },
+          "canClear": {
+            "type": "boolean"
+          },
+          "canExpire": {
+            "type": "boolean"
+          },
+          "canReset": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "canReserve",
+          "canArrive",
+          "canStartCharge",
+          "canDepart",
+          "canRelease",
+          "canBlock",
+          "canClear",
+          "canExpire",
+          "canReset"
+        ]
+      },
+      "ReservationState": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "mock"
+            ]
+          },
+          "now": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "bay": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "demo-bay-1"
+                ]
+              },
+              "label": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "free",
+                  "reserved",
+                  "blocked",
+                  "charging",
+                  "occupied",
+                  "awaiting-release"
+                ]
+              },
+              "occupied": {
+                "type": "boolean"
+              },
+              "barrier": {
+                "type": "string",
+                "enum": [
+                  "raised",
+                  "lowered"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "label",
+              "status",
+              "occupied",
+              "barrier"
+            ]
+          },
+          "reservation": {
+            "$ref": "#/components/schemas/SimulatorReservation"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Event"
+            },
+            "maxItems": 40,
+            "description": "Newest first; no raw plates."
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/SimulatorCapabilities"
+          }
+        },
+        "description": "Shared process-local simulator. No authentication/user isolation, persistence or physical hardware control. Resets/restarts discard this state.",
+        "required": [
+          "mode",
+          "now",
+          "bay",
+          "reservation",
+          "events",
+          "capabilities"
+        ]
+      },
+      "ReservationPolicy": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string",
+            "enum": [
+              "EUR"
+            ]
+          },
+          "mock": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "nowFreeMinutes": {
+            "type": "integer",
+            "enum": [
+              10
+            ]
+          },
+          "extensionMinutes": {
+            "type": "integer",
+            "enum": [
+              10
+            ]
+          },
+          "extensionFeeCents": {
+            "type": "integer",
+            "enum": [
+              100
+            ]
+          },
+          "scheduledFeeCents": {
+            "type": "integer",
+            "enum": [
+              100
+            ]
+          },
+          "protectionLeadMinutes": {
+            "type": "integer",
+            "enum": [
+              10
+            ]
+          },
+          "arrivalGraceMinutes": {
+            "type": "integer",
+            "enum": [
+              10
+            ]
+          }
+        },
+        "description": "Backend durable-workflow policy. All amounts are mock EUR cents; no payment collection or refund transaction occurs. This differs from the direct Audimax presentation client, whose local demo timers use 30 seconds.",
+        "required": [
+          "currency",
+          "mock",
+          "nowFreeMinutes",
+          "extensionMinutes",
+          "extensionFeeCents",
+          "scheduledFeeCents",
+          "protectionLeadMinutes",
+          "arrivalGraceMinutes"
+        ]
+      },
+      "QuoteRequest": {
+        "type": "object",
+        "properties": {
+          "startsAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Explicit ISO timestamp with timezone. Start must be no more than 60 seconds in the past and at most seven days in the future. In now mode it must also be within the next 60 seconds."
+          },
+          "endsAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Exactly 10 minutes or 30 seconds after startsAt. The 30-second duration is accepted for rehearsal; the returned policy remains ten-minute policy."
+          },
+          "bookingMode": {
+            "type": "string",
+            "enum": [
+              "now",
+              "scheduled"
+            ],
+            "default": "scheduled"
+          }
+        },
+        "required": [
+          "startsAt",
+          "endsAt"
+        ]
+      },
+      "HardwareQuote": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string",
+            "enum": [
+              "EUR"
+            ]
+          },
+          "mock": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "nowFreeMinutes": {
+            "type": "integer",
+            "enum": [
+              10
+            ]
+          },
+          "extensionMinutes": {
+            "type": "integer",
+            "enum": [
+              10
+            ]
+          },
+          "extensionFeeCents": {
+            "type": "integer",
+            "enum": [
+              100
+            ]
+          },
+          "scheduledFeeCents": {
+            "type": "integer",
+            "enum": [
+              100
+            ]
+          },
+          "protectionLeadMinutes": {
+            "type": "integer",
+            "enum": [
+              10
+            ]
+          },
+          "arrivalGraceMinutes": {
+            "type": "integer",
+            "enum": [
+              10
+            ]
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "durationMinutes": {
+            "type": "number",
+            "enum": [
+              0.5,
+              10
+            ]
+          },
+          "bookingMode": {
+            "type": "string",
+            "enum": [
+              "now",
+              "scheduled"
+            ]
+          },
+          "fixedFeeCents": {
+            "type": "integer",
+            "enum": [
+              0,
+              100
+            ]
+          },
+          "maxChargeCents": {
+            "type": "integer",
+            "enum": [
+              0,
+              100
+            ],
+            "description": "Same as fixedFeeCents; quote only, no actual payment."
+          },
+          "protectionStartsAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Now mode: startsAt. Scheduled: max(server time, startsAt minus ten minutes)."
+          },
+          "protectionDeadlineAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Equal to endsAt."
+          }
+        },
+        "required": [
+          "currency",
+          "mock",
+          "nowFreeMinutes",
+          "extensionMinutes",
+          "extensionFeeCents",
+          "scheduledFeeCents",
+          "protectionLeadMinutes",
+          "arrivalGraceMinutes",
+          "startsAt",
+          "endsAt",
+          "durationMinutes",
+          "bookingMode",
+          "fixedFeeCents",
+          "maxChargeCents",
+          "protectionStartsAt",
+          "protectionDeadlineAt"
+        ]
+      },
+      "BookingPlate": {
+        "type": "string",
+        "minLength": 2,
+        "maxLength": 64,
+        "example": "M-DEMO-42",
+        "writeOnly": true,
+        "description": "Transient plate input: NFKC-normalized, uppercased, whitespace/dashes removed; result must contain 2–15 Unicode letters/digits. Node sends keyed HMAC and masked suffix to SQL, not the raw plate. Use fictional data for demos."
+      },
+      "HardwareSlotRequest": {
+        "type": "object",
+        "properties": {
+          "bayId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Registered physical one-vehicle bay; obtain the real UUID from the configured workflow."
+          },
+          "connectorId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Enabled connector belonging to this bay. Allocation holds the whole bay."
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Fresh idempotency identifier per logical reservation; retain it when reconciling uncertain outcomes."
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "bookingMode": {
+            "type": "string",
+            "enum": [
+              "now",
+              "scheduled"
+            ],
+            "default": "scheduled"
+          },
+          "licensePlate": {
+            "$ref": "#/components/schemas/BookingPlate"
+          }
+        },
+        "description": "Registered hardware booking intent, not a GoingElectric directory plug or local Audimax hold. Window constraints are identical to QuoteRequest; the deployed database independently validates allocation rules.",
+        "required": [
+          "bayId",
+          "connectorId",
+          "requestId",
+          "startsAt",
+          "endsAt",
+          "licensePlate"
+        ]
+      },
+      "SlotCancelRequest": {
+        "type": "object",
+        "properties": {
+          "slotId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "slotId"
+        ]
+      },
+      "SlotExtensionRequest": {
+        "type": "object",
+        "properties": {
+          "slotId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Idempotency UUID for this extension."
+          }
+        },
+        "required": [
+          "slotId",
+          "requestId"
+        ]
+      },
+      "HardwareSlot": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Only the owner sees this identifier.",
+            "nullable": true
+          },
+          "bayId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "connectorId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "scheduled",
+              "active",
+              "blocked",
+              "cancel_requested",
+              "cancelled",
+              "completed",
+              "expired"
+            ]
+          },
+          "isMine": {
+            "type": "boolean"
+          },
+          "canCancel": {
+            "type": "boolean"
+          },
+          "maskedPlate": {
+            "type": "string",
+            "nullable": true
+          },
+          "arrivedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "departedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "activatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "entryAuthorizedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "protectionDeadlineAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "mockFeeCents": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Owner-visible mock net fee; zero when mock-refunded.",
+            "nullable": true
+          },
+          "bookingMode": {
+            "type": "string",
+            "enum": [
+              "now",
+              "scheduled"
+            ]
+          },
+          "reservationFeeCents": {
+            "type": "integer",
+            "minimum": 0,
+            "nullable": true
+          },
+          "paymentStatus": {
+            "type": "string",
+            "enum": [
+              "free",
+              "mock_free",
+              "mock_paid",
+              "mock_refunded",
+              null
+            ],
+            "nullable": true
+          },
+          "protectionStartsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "requestedBayId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "requestedConnectorId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "extensionCount": {
+            "type": "integer",
+            "minimum": 0,
+            "nullable": true
+          },
+          "failureReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "fallbackReason": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "description": "Non-owner schedule records redact identifiers, plate suffix, personal timestamps and fee details. A booking/active flag alone does not establish physical barrier position or charging.",
+        "required": [
+          "id",
+          "bayId",
+          "connectorId",
+          "startsAt",
+          "endsAt",
+          "status",
+          "isMine",
+          "canCancel",
+          "maskedPlate",
+          "arrivedAt",
+          "departedAt",
+          "activatedAt",
+          "mockFeeCents"
+        ]
+      },
+      "HardwareAlternative": {
+        "type": "object",
+        "properties": {
+          "locationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "label": {
+            "type": "string"
+          },
+          "latitude": {
+            "type": "number",
+            "minimum": -90,
+            "maximum": 90,
+            "nullable": true
+          },
+          "longitude": {
+            "type": "number",
+            "minimum": -180,
+            "maximum": 180,
+            "nullable": true
+          },
+          "distanceKm": {
+            "type": "number",
+            "minimum": 0,
+            "nullable": true
+          },
+          "availableBays": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "connectorTypes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "locationId",
+          "label",
+          "latitude",
+          "longitude",
+          "distanceKm",
+          "availableBays",
+          "connectorTypes"
+        ]
+      },
+      "HardwareSlotSnapshot": {
+        "type": "object",
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          },
+          "serverNow": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "slots": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HardwareSlot"
+            },
+            "maxItems": 1000
+          },
+          "alternatives": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HardwareAlternative"
+            },
+            "maxItems": 3,
+            "description": "Best-effort nearby registered-inventory suggestions after an owner booking fails with LOCATION_FULL; requires a new booking."
+          },
+          "policy": {
+            "$ref": "#/components/schemas/ReservationPolicy"
+          },
+          "commandsEnabled": {
+            "type": "boolean"
+          }
+        },
+        "description": "Disabled setup returns configured:false and empty slots without authentication. Activated reads require a valid Supabase user JWT. Absence of another booking only means unreserved in this inventory scope, not physically vacant.",
+        "required": [
+          "configured",
+          "serverNow",
+          "slots",
+          "policy"
+        ]
+      },
+      "HardwareLock": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "lock-0002"
+          },
+          "name": {
+            "type": "string"
+          },
+          "hasCamera": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "raised",
+              "lowered",
+              "raising",
+              "lowering",
+              "offline",
+              "unknown"
+            ]
+          },
+          "lastSeenAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "telemetryFresh": {
+            "type": "boolean"
+          },
+          "barrier": {
+            "type": "string",
+            "enum": [
+              "raised",
+              "lowered",
+              "unknown"
+            ]
+          },
+          "occupancy": {
+            "type": "string",
+            "enum": [
+              "vacant",
+              "occupied",
+              "unknown"
+            ]
+          },
+          "lastReportedPresence": {
+            "type": "string",
+            "enum": [
+              "vacant",
+              "occupied",
+              "unknown"
+            ]
+          },
+          "activeErrors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20
+          },
+          "faultsKnown": {
+            "type": "boolean"
+          },
+          "waterIngress": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "battery12V": {
+            "type": "number",
+            "nullable": true
+          },
+          "battery3_7V": {
+            "type": "number",
+            "nullable": true
+          },
+          "signalStrength4G": {
+            "type": "number",
+            "nullable": true
+          },
+          "whitelist": {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "any-plate",
+                  "specific-plates",
+                  "disabled",
+                  "unknown"
+                ]
+              },
+              "count": {
+                "type": "integer",
+                "minimum": 0,
+                "nullable": true
+              }
+            },
+            "required": [
+              "mode",
+              "count"
+            ]
+          },
+          "plateObservation": {
+            "type": "object",
+            "properties": {
+              "detected": {
+                "type": "boolean"
+              },
+              "timestamp": {
+                "type": "string",
+                "format": "date-time",
+                "nullable": true
+              }
+            },
+            "nullable": true,
+            "required": [
+              "detected",
+              "timestamp"
+            ]
+          }
+        },
+        "description": "Redacted read-only provider observation. No raw plate, whitelist values or image. Missing/future/stale/offline telemetry produces unknown derived state. A successful command is not proof of movement.",
+        "required": [
+          "id",
+          "name",
+          "hasCamera",
+          "status",
+          "lastSeenAt",
+          "telemetryFresh",
+          "barrier",
+          "occupancy",
+          "lastReportedPresence",
+          "activeErrors",
+          "faultsKnown",
+          "waterIngress",
+          "battery12V",
+          "battery3_7V",
+          "signalStrength4G",
+          "whitelist",
+          "plateObservation"
+        ]
+      },
+      "HardwareSnapshot": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "ecurious"
+            ]
+          },
+          "access": {
+            "type": "string",
+            "enum": [
+              "read-only"
+            ]
+          },
+          "configured": {
+            "type": "boolean"
+          },
+          "fetchedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "team": {
+            "type": "string",
+            "nullable": true
+          },
+          "freshnessLimitMs": {
+            "type": "integer",
+            "enum": [
+              60000
+            ],
+            "description": "Local diagnostic freshness threshold, not a hardware guarantee."
+          },
+          "locks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HardwareLock"
+            },
+            "maxItems": 100
+          }
+        },
+        "required": [
+          "source",
+          "access",
+          "configured",
+          "fetchedAt",
+          "team",
+          "freshnessLimitMs",
+          "locks"
+        ]
+      },
+      "BayConnector": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "label": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "example": "BARRIER_TEST"
+          },
+          "powerKw": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 2000,
+            "description": "BARRIER_TEST uses zero because the designated test rig has no charger. Charger connectors have positive power."
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "type",
+          "powerKw",
+          "enabled"
+        ]
+      },
+      "HardwareOperation": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "protect",
+              "entry",
+              "release"
+            ]
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "raised",
+              "lowered"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "claimed",
+              "dispatching",
+              "acknowledged",
+              "uncertain",
+              "confirmed",
+              "cancelled"
+            ]
+          },
+          "requestedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "dispatchedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "nullable": true,
+        "description": "Intent/dispatch status, not necessarily observed physical position. Protect targets raised; entry and release target lowered. An uncertain dispatched movement must be reconciled, never blindly retried.",
+        "required": [
+          "id",
+          "kind",
+          "target",
+          "status",
+          "requestedAt",
+          "dispatchedAt"
+        ]
+      },
+      "HardwareWorkflow": {
+        "type": "object",
+        "properties": {
+          "serverNow": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "bay": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "label": {
+                "type": "string"
+              },
+              "lockId": {
+                "type": "string"
+              },
+              "connectors": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/BayConnector"
+                }
+              }
+            },
+            "required": [
+              "id",
+              "label",
+              "lockId",
+              "connectors"
+            ]
+          },
+          "reservation": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid",
+                "nullable": true
+              },
+              "isMine": {
+                "type": "boolean"
+              },
+              "expiresAt": {
+                "type": "string",
+                "format": "date-time",
+                "nullable": true
+              }
+            },
+            "required": [
+              "id",
+              "isMine",
+              "expiresAt"
+            ]
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "idle",
+              "protect_pending",
+              "protecting",
+              "protected",
+              "entry_pending",
+              "entering",
+              "entry_open",
+              "release_pending",
+              "releasing",
+              "blocked",
+              "uncertain"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "nullable": true
+          },
+          "controlsEnabled": {
+            "type": "boolean"
+          },
+          "interlocksConfirmed": {
+            "type": "boolean"
+          },
+          "operation": {
+            "$ref": "#/components/schemas/HardwareOperation"
+          },
+          "capabilities": {
+            "type": "object",
+            "properties": {
+              "canReserve": {
+                "type": "boolean"
+              },
+              "canRequestEntry": {
+                "type": "boolean"
+              },
+              "canRequestRelease": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "canReserve",
+              "canRequestEntry",
+              "canRequestRelease"
+            ]
+          }
+        },
+        "required": [
+          "serverNow",
+          "bay",
+          "reservation",
+          "phase",
+          "reason",
+          "operation",
+          "capabilities"
+        ]
+      },
+      "HardwareWorkflowSnapshot": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "ecurious"
+            ]
+          },
+          "commandsEnabled": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string",
+            "nullable": true
+          },
+          "serverNow": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "workflows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HardwareWorkflow"
+            },
+            "maxItems": 50
+          },
+          "observations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HardwareLock"
+            },
+            "maxItems": 50
+          }
+        },
+        "description": "Durable registered-bay workflow plus separate provider observations. Disabled setup returns commandsEnabled:false, reason:HARDWARE_SETUP_REQUIRED and empty lists. HTTP 202 after a mutation acknowledges application intent; protection/entry needs later confirmed state.",
+        "required": [
+          "source",
+          "commandsEnabled",
+          "reason",
+          "serverNow",
+          "workflows",
+          "observations"
+        ]
+      },
+      "HardwareReservationRequest": {
+        "type": "object",
+        "properties": {
+          "bayId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "connectorId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "holdMinutes": {
+            "type": "integer",
+            "enum": [
+              5,
+              10,
+              15
+            ]
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "description": "Legacy immediate/manual reservation, distinct from plate-bound time slots. The selected connector holds the complete physical bay. Use registered UUIDs, never directory station IDs or an executable lock ID.",
+        "required": [
+          "bayId",
+          "connectorId",
+          "holdMinutes",
+          "requestId"
+        ]
+      },
+      "HardwareActionRequest": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "entry",
+              "release"
+            ]
+          },
+          "bayId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reservationId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "description": "Owner intent. Entry requires an unexpired protected legacy booking; plate-bound slots require camera authorization instead. Release requests cleanup, not unconditional unlocking.",
+        "required": [
+          "action",
+          "bayId",
+          "reservationId"
+        ]
+      },
+      "PlateRecognitionRequest": {
+        "type": "object",
+        "properties": {
+          "lockId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "example": "lock-0002",
+            "description": "Must belong to backend assigned-lock allowlist. This endpoint is only for the separate trusted recognition integration."
+          },
+          "eventId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Recognition event ID, scoped and keyed privately for replay handling."
+          },
+          "observedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "No more than 15 seconds old; future events are rejected. A matching event must be newer than confirmed protection."
+          },
+          "licensePlate": {
+            "$ref": "#/components/schemas/BookingPlate"
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "lockId",
+          "eventId",
+          "observedAt",
+          "licensePlate",
+          "confidence"
+        ]
+      },
+      "PlateRecognitionResult": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "matched": {
+            "type": "boolean"
+          },
+          "entryRequested": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "LOW_CONFIDENCE",
+              "NO_MATCHING_ACTIVE_BOOKING"
+            ]
+          }
+        },
+        "description": "202 can include a non-match. Matching requests entry but does not confirm lowering or occupancy. No image or raw plate is returned.",
+        "required": [
+          "accepted",
+          "matched",
+          "entryRequested"
+        ]
+      },
+      "EventbriteEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "eventbrite-123456789"
+          },
+          "title": {
+            "type": "string"
+          },
+          "subtitle": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "tech",
+              "sports",
+              "culture",
+              "concert"
+            ]
+          },
+          "emoji": {
+            "type": "string"
+          },
+          "venue": {
+            "type": "string"
+          },
+          "address": {
+            "type": "string"
+          },
+          "latitude": {
+            "type": "number",
+            "minimum": -90,
+            "maximum": 90
+          },
+          "longitude": {
+            "type": "number",
+            "minimum": -180,
+            "maximum": 180
+          },
+          "date": {
+            "type": "string",
+            "description": "Human-readable event date in Europe/Berlin."
+          },
+          "expectedAttendance": {
+            "type": "string",
+            "enum": [
+              "Not provided"
+            ]
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Public HTTPS Eventbrite event link."
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "eventbrite"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "subtitle",
+          "category",
+          "emoji",
+          "venue",
+          "address",
+          "latitude",
+          "longitude",
+          "date",
+          "expectedAttendance",
+          "url",
+          "startsAt",
+          "source"
+        ]
+      },
+      "EventFeed": {
+        "type": "object",
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "eventbrite"
+            ]
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "organization",
+              "curated",
+              "not_configured"
+            ]
+          },
+          "fetchedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reason": {
+            "type": "string",
+            "nullable": true
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EventbriteEvent"
+            }
+          }
+        },
+        "description": "Organization or curated public event feed within 50 km of Munich. Provider/configuration failures return HTTP 200 with an empty events list and a sanitized reason. Live feed never silently substitutes fictional events; presentation samples are an explicit mobile choice.",
+        "required": [
+          "configured",
+          "source",
+          "scope",
+          "fetchedAt",
+          "reason",
+          "events"
+        ]
+      },
+      "LabCarId": {
+        "type": "string",
+        "enum": [
+          "car-a",
+          "car-b",
+          "car-c"
+        ]
+      },
+      "LabBayId": {
+        "type": "string",
+        "enum": [
+          "bay-1",
+          "bay-2",
+          "bay-3"
+        ]
+      },
+      "LabScenarioId": {
+        "type": "string",
+        "enum": [
+          "race",
+          "plate-check",
+          "no-show",
+          "extension",
+          "scheduled-window",
+          "blocked-fallback",
+          "full-refund"
+        ]
+      },
+      "LabResetAction": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "reset"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "action"
+        ]
+      },
+      "LabScenarioAction": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "scenario"
+            ]
+          },
+          "scenarioId": {
+            "$ref": "#/components/schemas/LabScenarioId"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "action",
+          "scenarioId"
+        ]
+      },
+      "LabAdvanceAction": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "advance"
+            ]
+          },
+          "minutes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 180
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "action",
+          "minutes"
+        ]
+      },
+      "LabReservenowAction": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "reserve"
+            ]
+          },
+          "carId": {
+            "$ref": "#/components/schemas/LabCarId"
+          },
+          "bayId": {
+            "$ref": "#/components/schemas/LabBayId"
+          },
+          "bookingMode": {
+            "type": "string",
+            "enum": [
+              "now"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "action",
+          "carId",
+          "bayId",
+          "bookingMode"
+        ]
+      },
+      "LabReservescheduledAction": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "reserve"
+            ]
+          },
+          "carId": {
+            "$ref": "#/components/schemas/LabCarId"
+          },
+          "bayId": {
+            "$ref": "#/components/schemas/LabBayId"
+          },
+          "bookingMode": {
+            "type": "string",
+            "enum": [
+              "scheduled"
+            ]
+          },
+          "arrivalMinutesFromNow": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10080
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "action",
+          "carId",
+          "bayId",
+          "bookingMode",
+          "arrivalMinutesFromNow"
+        ]
+      },
+      "LabExtendAction": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "extend"
+            ]
+          },
+          "carId": {
+            "$ref": "#/components/schemas/LabCarId"
+          },
+          "bookingId": {
+            "type": "string",
+            "example": "booking-1"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "action",
+          "carId",
+          "bookingId"
+        ]
+      },
+      "LabScanAction": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "scan"
+            ]
+          },
+          "carId": {
+            "$ref": "#/components/schemas/LabCarId"
+          },
+          "bayId": {
+            "$ref": "#/components/schemas/LabBayId"
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "action",
+          "carId",
+          "bayId",
+          "confidence"
+        ]
+      },
+      "LabParkorblockAction": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "park",
+              "block"
+            ]
+          },
+          "carId": {
+            "$ref": "#/components/schemas/LabCarId"
+          },
+          "bayId": {
+            "$ref": "#/components/schemas/LabBayId"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "action",
+          "carId",
+          "bayId"
+        ]
+      },
+      "LabDepartAction": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "depart"
+            ]
+          },
+          "carId": {
+            "$ref": "#/components/schemas/LabCarId"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "action",
+          "carId"
+        ]
+      },
+      "LabObserveorclearAction": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "observe",
+              "clear"
+            ]
+          },
+          "bayId": {
+            "$ref": "#/components/schemas/LabBayId"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "action",
+          "bayId"
+        ]
+      },
+      "LabActionRequest": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/LabResetAction"
+          },
+          {
+            "$ref": "#/components/schemas/LabScenarioAction"
+          },
+          {
+            "$ref": "#/components/schemas/LabAdvanceAction"
+          },
+          {
+            "$ref": "#/components/schemas/LabReservenowAction"
+          },
+          {
+            "$ref": "#/components/schemas/LabReservescheduledAction"
+          },
+          {
+            "$ref": "#/components/schemas/LabExtendAction"
+          },
+          {
+            "$ref": "#/components/schemas/LabScanAction"
+          },
+          {
+            "$ref": "#/components/schemas/LabParkorblockAction"
+          },
+          {
+            "$ref": "#/components/schemas/LabDepartAction"
+          },
+          {
+            "$ref": "#/components/schemas/LabObserveorclearAction"
+          }
+        ],
+        "description": "Independent fictional multi-car rehearsal. Reset/scenario replaces the shared lab world. A command acknowledgement and a separate observe action are intentionally distinct. No real keys, plates, hardware, payments or database."
+      },
+      "LabBooking": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "carId": {
+            "$ref": "#/components/schemas/LabCarId"
+          },
+          "bayId": {
+            "$ref": "#/components/schemas/LabBayId"
+          },
+          "requestedBayId": {
+            "$ref": "#/components/schemas/LabBayId"
+          },
+          "bookingMode": {
+            "type": "string",
+            "enum": [
+              "now",
+              "scheduled"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "scheduled",
+              "protecting",
+              "protected",
+              "entry_pending",
+              "entry_authorized",
+              "arrived",
+              "cleanup",
+              "cleanup-blocked",
+              "completed",
+              "expired",
+              "refunded"
+            ]
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "protectionStartsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deadlineAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "entryAuthorizedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "arrivedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "endedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "extensionCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 11
+          },
+          "mockFeeCents": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "mockRefundCents": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "alternativeLocationId": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "carId",
+          "bayId",
+          "requestedBayId",
+          "bookingMode",
+          "status",
+          "startsAt",
+          "protectionStartsAt",
+          "deadlineAt",
+          "entryAuthorizedAt",
+          "arrivedAt",
+          "endedAt",
+          "extensionCount",
+          "mockFeeCents",
+          "mockRefundCents",
+          "alternativeLocationId"
+        ]
+      },
+      "LabBay": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/LabBayId"
+          },
+          "label": {
+            "type": "string"
+          },
+          "locationId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "description": "Available, awaiting-observation, occupied, blocked, or current active lab booking status."
+          },
+          "barrier": {
+            "type": "string",
+            "enum": [
+              "raised",
+              "lowered"
+            ]
+          },
+          "occupantCarId": {
+            "type": "string",
+            "nullable": true
+          },
+          "activeBookingId": {
+            "type": "string",
+            "nullable": true
+          },
+          "observedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "connectors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "powerKw": {
+                  "type": "number",
+                  "exclusiveMinimum": true,
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "id",
+                "type",
+                "powerKw"
+              ]
+            },
+            "maxItems": 5
+          },
+          "pendingCommand": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "target": {
+                "type": "string",
+                "enum": [
+                  "raised",
+                  "lowered"
+                ]
+              },
+              "acknowledgedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "nullable": true,
+            "required": [
+              "id",
+              "target",
+              "acknowledgedAt"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "locationId",
+          "status",
+          "barrier",
+          "occupantCarId",
+          "activeBookingId",
+          "observedAt",
+          "connectors",
+          "pendingCommand"
+        ]
+      },
+      "LabSnapshot": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "simulation"
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "now": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/ReservationPolicy"
+          },
+          "scenarioId": {
+            "type": "string",
+            "enum": [
+              "race",
+              "plate-check",
+              "no-show",
+              "extension",
+              "scheduled-window",
+              "blocked-fallback",
+              "full-refund",
+              null
+            ],
+            "nullable": true
+          },
+          "cars": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "$ref": "#/components/schemas/LabCarId"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "maskedPlate": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "label",
+                "maskedPlate"
+              ]
+            },
+            "maxItems": 3
+          },
+          "locations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "distanceKm": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "id",
+                "label",
+                "distanceKm"
+              ]
+            },
+            "maxItems": 3
+          },
+          "bays": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LabBay"
+            },
+            "maxItems": 3
+          },
+          "bookings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LabBooking"
+            },
+            "maxItems": 60
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Event"
+            },
+            "maxItems": 80
+          },
+          "scenarios": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "$ref": "#/components/schemas/LabScenarioId"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "label",
+                "description"
+              ]
+            },
+            "maxItems": 7
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "passed": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "id",
+                "label",
+                "passed"
+              ]
+            },
+            "maxItems": 30
+          }
+        },
+        "description": "One process-local fictional world shared by every client of this server. Deterministic scenario checks rehearse invariants; they do not prove production concurrency or hardware safety.",
+        "required": [
+          "mode",
+          "revision",
+          "now",
+          "policy",
+          "scenarioId",
+          "cars",
+          "locations",
+          "bays",
+          "bookings",
+          "events",
+          "scenarios",
+          "checks"
+        ]
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Invalid JSON, object, identifier, plate, time window or action. Codes include INVALID_INPUT, INVALID_JSON, INVALID_SLOT, INVALID_PLATE, INVALID_LAB_ACTION, INVALID_PLATE_EVENT.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Missing/invalid user JWT or callback token. AUTH_REQUIRED uses Supabase identity; VISION_AUTH_REQUIRED uses the separate recognition-service credential.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "State/allocation conflict, rejected observation or idempotency mismatch. Read current state before another mutation. Codes include BAY_OCCUPIED, BAY_RESERVED, HARDWARE_BUSY, SLOT_RESERVED, RESERVATION_NOT_FOUND, IDEMPOTENCY_CONFLICT, PLATE_EVENT_INVALID, EXTENSION_NOT_AVAILABLE.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": {
+                "code": "BAY_OCCUPIED",
+                "message": "A reservation requires an empty bay."
+              }
+            }
+          }
+        }
+      },
+      "TooLarge": {
+        "description": "BODY_TOO_LARGE: JSON request exceeds 8 KiB.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "UnsupportedMedia": {
+        "description": "UNSUPPORTED_MEDIA_TYPE: POST requires application/json; a charset parameter is accepted.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "InternalError": {
+        "description": "INTERNAL_ERROR: fixed sanitized error for an unexpected failure.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "BadGateway": {
+        "description": "Provider/database response or connection failed. No provider response body or credential is exposed. A failed response after an intent may leave a committed booking; reconcile by GET.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Unavailable": {
+        "description": "Backend/migrations/credentials/assigned device activation are unavailable. Codes include HARDWARE_SETUP_REQUIRED, HARDWARE_SCHEMA_MISSING, HARDWARE_CONFIGURATION and VISION_SETUP_REQUIRED.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": {
+                "code": "HARDWARE_SETUP_REQUIRED",
+                "message": "Designated hardware control is not activated on this backend."
+              }
+            }
+          }
+        }
+      },
+      "Timeout": {
+        "description": "ECURIOUS_TIMEOUT or HARDWARE_STORE_TIMEOUT. An uncertain mutation must be reconciled before issuing a new logical operation.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "NOT_FOUND: unknown API path.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "MethodNotAllowed": {
+        "description": "METHOD_NOT_ALLOWED: known path with an unsupported HTTP method; response includes Allow.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        },
+        "headers": {
+          "Allow": {
+            "description": "Supported HTTP methods for this path.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  },
+  "x-state-domains": {
+    "simulator": "/api/state, /api/reservations and /api/actions; memory only",
+    "multiCarLab": "/api/simulation and /api/simulation/actions; independent fictional world",
+    "registeredHardware": "/api/hardware/bookings, /api/hardware/actions and /api/hardware/slots*; durable Supabase-backed owner intent",
+    "directAudimaxDemo": "Phone → Ecurious /api/v1/*; local SecureStore holds and foreground 30-second timers; external provider contract",
+    "directorySoftwareHolds": "Phone → Supabase RPCs with direct GoingElectric directory lookup; no public hardware allocation"
+  }
+}
