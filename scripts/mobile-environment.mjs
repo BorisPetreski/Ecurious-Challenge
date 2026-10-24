@@ -32,5 +32,9 @@ export function mobileEnvironment(env) {
     result.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY = supabaseKey.trim();
   }
   if (directoryKey?.trim()) result.EXPO_PUBLIC_GOINGELECTRIC_API_KEY = directoryKey.trim();
+  const audimaxKey = env.EXPO_PUBLIC_AUDIMAX_API_KEY || env.AUDIMAX_API_KEY || env.ECURIOUS_API_KEY;
+  if (audimaxKey?.trim()) result.EXPO_PUBLIC_AUDIMAX_API_KEY = audimaxKey.trim();
+  const audimaxBaseUrl = env.EXPO_PUBLIC_AUDIMAX_BASE_URL || env.AUDIMAX_BASE_URL || env.ECURIOUS_BASE_URL;
+  if (audimaxBaseUrl?.trim()) result.EXPO_PUBLIC_AUDIMAX_BASE_URL = audimaxBaseUrl.trim();
   return result;
 }

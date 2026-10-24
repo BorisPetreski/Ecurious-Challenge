@@ -18,12 +18,30 @@ import { fetchDirectory, type DirectoryRegion, type DirectoryResult, type Direct
 import { groupRegisteredLocations, matchingConnectors, type RegisteredLocation } from '@/lib/map-inventory';
 import { formatHardwareInstant } from '@/lib/hardware-time';
 import { buildDirectorySlotGroups, directoryGroupStatus, directorySlotKey, directorySlotOrdinal, directorySlotPage, type DirectorySlotGroup, type DirectorySlotHold } from '@/lib/directory-slots';
+import {
+  AUDIMAX_COORDINATES,
+  PREFERRED_LOCK_ID,
+  fetchAudimaxLocks,
+  reserveAudimaxLock,
+  releaseAudimaxLock,
+  getStoredActiveHold,
+  setStoredActiveHold,
+  type AudimaxLock,
+  type AudimaxActiveHold,
+} from '@/lib/audimax-lock-api';
+import { AudimaxBookingModal } from '@/components/audimax-booking-modal';
+import { MunichEventsModal } from '@/components/munich-events-modal';
+import {
+  MUNICH_MOCK_EVENTS,
+  type MunichEvent,
+  type EventChargingSpot,
+} from '@/lib/munich-events';
 
 // Expo replaces this public directory key at bundle time. Hardware keys stay on the backend.
 const DIRECTORY_KEY = process.env.EXPO_PUBLIC_GOINGELECTRIC_API_KEY?.trim() ?? '';
 const SOURCE_URL = 'https://www.goingelectric.de/stromtankstellen/';
 const CACHE_LIFETIME_MS = 60 * 60 * 1_000;
-const INITIAL_REGION: DirectoryRegion = { latitude: 52.52, longitude: 13.405, latitudeDelta: 0.095, longitudeDelta: 0.095 };
+const INITIAL_REGION: DirectoryRegion = { latitude: 48.1488, longitude: 11.568, latitudeDelta: 0.05, longitudeDelta: 0.05 };
 type PlugFilter = 'CCS' | 'Typ2' | 'CHAdeMO' | undefined;
 
 function regionMoved(next: DirectoryRegion, previous: DirectoryRegion) {
@@ -110,6 +128,133 @@ export default function MapScreen() {
   const [bookingNotice, setBookingNotice] = useState<string | null>(null);
   const [clockNow, setClockNow] = useState(Date.now);
   const clockAnchor = useRef({ serverAt: Date.now(), clientAt: Date.now() });
+  const [selectedAudimax, setSelectedAudimax] = useState(false);
+  const [audimaxLocks, setAudimaxLocks] = useState<AudimaxLock[]>([]);
+  const [audimaxTeam, setAudimaxTeam] = useState<string>('Alpha Explorers');
+  const [audimaxLoading, setAudimaxLoading] = useState(false);
+  const [audimaxError, setAudimaxError] = useState<string | null>(null);
+  const [selectedLockId, setSelectedLockId] = useState<string>(PREFERRED_LOCK_ID);
+  const [activeHold, setActiveHold] = useState<AudimaxActiveHold | null>(null);
+  const [activeHoldSecondsLeft, setActiveHoldSecondsLeft] = useState(0);
+  const [audimaxActionBusy, setAudimaxActionBusy] = useState(false);
+  const [audimaxActionNotice, setAudimaxActionNotice] = useState<string | null>(null);
+  const [audimaxModalOpen, setAudimaxModalOpen] = useState(false);
+  const [eventsModalOpen, setEventsModalOpen] = useState(false);
+  const [selectedEvent, setSelectedEvent] = useState<MunichEvent>(MUNICH_MOCK_EVENTS[0]);
+  const [activeEventFilter, setActiveEventFilter] = useState<MunichEvent | null>(null);
+
+  const audimaxPollBusyRef = useRef(false);
+  const audimaxLastPollRef = useRef(0);
+  const handleAudimaxLeaveRef = useRef<((reason?: string) => Promise<void>) | null>(null);
+
+  const loadAudimaxData = useCallback(async (): Promise<AudimaxLock[]> => {
+    setAudimaxLoading(true);
+    setAudimaxError(null);
+    try {
+      const stored = await getStoredActiveHold();
+      setActiveHold(stored);
+      const res = await fetchAudimaxLocks();
+      setAudimaxLocks(res.locks);
+      if (res.team) setAudimaxTeam(res.team);
+      if (res.locks.length > 0) {
+        const hasPreferred = res.locks.some(l => l.id === PREFERRED_LOCK_ID);
+        setSelectedLockId(current => {
+          if (current && res.locks.some(l => l.id === current)) return current;
+          return hasPreferred ? PREFERRED_LOCK_ID : res.locks[0].id;
+        });
+      }
+      return res.locks;
+    } catch (err) {
+      setAudimaxError(err instanceof Error ? err.message : 'Could not fetch Audimax hardware status');
+      return [];
+    } finally {
+      setAudimaxLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadAudimaxData();
+  }, [loadAudimaxData]);
+
+  useEffect(() => {
+    if (!activeHold) {
+      setActiveHoldSecondsLeft(0);
+      return;
+    }
+    const updateTimer = async () => {
+      const nowMs = Date.now();
+      if (activeHold.status === 'scheduled') {
+        const raiseAtMs = Date.parse(activeHold.raiseAt);
+        if (nowMs >= raiseAtMs && !audimaxActionBusy) {
+          try {
+            await reserveAudimaxLock(activeHold.lockId, [activeHold.plate]);
+            const updated: AudimaxActiveHold = {
+              ...activeHold,
+              status: 'active',
+            };
+            await setStoredActiveHold(updated);
+            setActiveHold(updated);
+            setActiveHoldSecondsLeft(Math.max(0, Math.ceil((Date.parse(updated.expiresAt) - nowMs) / 1000)));
+            setAudimaxActionNotice('Arrival window reached! Barrier raised & plate whitelisted.');
+            await loadAudimaxData();
+          } catch (err) {
+            console.warn('Failed to raise barrier at scheduled time:', err);
+          }
+        }
+      } else if (activeHold.status === 'active') {
+        const left = Math.max(0, Math.ceil((Date.parse(activeHold.expiresAt) - nowMs) / 1000));
+        setActiveHoldSecondsLeft(left);
+
+        // Periodically poll hardware telemetry to detect if car has arrived
+        let currentLock = audimaxLocks.find(l => l.id === activeHold.lockId);
+        if (!audimaxPollBusyRef.current && (nowMs - audimaxLastPollRef.current > 3000 || left === 0)) {
+          audimaxPollBusyRef.current = true;
+          audimaxLastPollRef.current = nowMs;
+          try {
+            const freshLocks = await loadAudimaxData();
+            const found = freshLocks.find(l => l.id === activeHold.lockId);
+            if (found) currentLock = found;
+          } catch (err) {
+            console.warn('Failed to poll lock status:', err);
+          } finally {
+            audimaxPollBusyRef.current = false;
+          }
+        }
+
+        // If car showed up in the bay, transition to occupied - do NOT unlock!
+        if (currentLock?.carPresence === 'occupied') {
+          const occupiedHold: AudimaxActiveHold = {
+            ...activeHold,
+            status: 'occupied',
+          };
+          await setStoredActiveHold(occupiedHold);
+          setActiveHold(occupiedHold);
+          setAudimaxActionNotice(`Vehicle arrived in bay! ${currentLock.name || currentLock.id} is occupied.`);
+          return;
+        }
+
+        // If 30-second arrival window expired and car has NOT shown up, auto-unlock
+        if (left === 0 && !audimaxActionBusy) {
+          void handleAudimaxLeaveRef.current?.('No-show timeout (30s): Car did not arrive. Barrier unlocked & whitelist cleared.');
+        }
+      } else if (activeHold.status === 'occupied') {
+        // While occupied, occasionally refresh telemetry
+        if (!audimaxPollBusyRef.current && nowMs - audimaxLastPollRef.current > 10000) {
+          audimaxPollBusyRef.current = true;
+          audimaxLastPollRef.current = nowMs;
+          try {
+            await loadAudimaxData();
+          } finally {
+            audimaxPollBusyRef.current = false;
+          }
+        }
+      }
+    };
+    void updateTimer();
+    const interval = setInterval(() => { void updateTimer(); }, 1000);
+    return () => clearInterval(interval);
+  }, [activeHold, audimaxActionBusy, audimaxLocks, loadAudimaxData]);
+
   const [minPower, setMinPower] = useState<number | undefined>();
   const minPowerRef = useRef(minPower);
   minPowerRef.current = minPower;
@@ -373,6 +518,7 @@ export default function MapScreen() {
   };
 
   const selectLocation = (location: RegisteredLocation<BayAvailability>) => {
+    setSelectedAudimax(false);
     setSelected(null);
     setSelectedLocationId(location.id);
     setSelectedBayId(null);
@@ -450,8 +596,144 @@ export default function MapScreen() {
 
   const selectDirectoryStation = (station: DirectoryStation) => {
     automaticPlugSelection.current = true;
+    setSelectedAudimax(false);
     setSelected(station); setSelectedListedPlug(null); setListedPlugPage(0); setDirectoryConfirming(false); setDirectoryNotice(null);
     setSelectedLocationId(null); setSelectedBayId(null); setSelectedConnectorId(null); setConfirming(false); setFiltersOpen(false);
+  };
+
+  const selectAudimax = () => {
+    setSelectedAudimax(true);
+    setSelected(null);
+    setSelectedListedPlug(null);
+    setSelectedBayId(null);
+    setSelectedLocationId(null);
+    setSelectedConnectorId(null);
+    setFiltersOpen(false);
+    setConfirming(false);
+    setDirectoryConfirming(false);
+    void loadAudimaxData();
+  };
+
+  const handleAudimaxReserve = async (choice?: { bookingMode: 'now' | 'scheduled'; startsAt?: string; plate: string }) => {
+    const lock = audimaxLocks.find(l => l.id === selectedLockId) ?? audimaxLocks[0];
+    if (!lock) return;
+    setAudimaxActionBusy(true);
+    setAudimaxActionNotice(null);
+    try {
+      const plate = choice?.plate || profile?.licensePlate?.trim() || 'MBD14E';
+      const isScheduled = choice?.bookingMode === 'scheduled' && !!choice.startsAt;
+      const startsAt = isScheduled ? choice!.startsAt : undefined;
+      const nowMs = Date.now();
+      const startsAtMs = startsAt ? Date.parse(startsAt) : nowMs;
+      const raiseAtMs = isScheduled ? startsAtMs - 30 * 1000 : nowMs;
+      const expiresAtMs = startsAtMs + 30 * 1000;
+
+      // Only raise the barrier if we are within 30 seconds of the selected time (or reserving now)
+      const shouldRaiseNow = raiseAtMs <= nowMs;
+
+      if (shouldRaiseNow) {
+        await reserveAudimaxLock(lock.id, [plate]);
+      }
+
+      const hold: AudimaxActiveHold = {
+        lockId: lock.id,
+        lockName: lock.name || lock.id,
+        plate,
+        reservedAt: new Date(nowMs).toISOString(),
+        bookingMode: isScheduled ? 'scheduled' : 'now',
+        startsAt,
+        raiseAt: new Date(raiseAtMs).toISOString(),
+        expiresAt: new Date(expiresAtMs).toISOString(),
+        status: shouldRaiseNow ? 'active' : 'scheduled',
+      };
+
+      await setStoredActiveHold(hold);
+      setActiveHold(hold);
+      if (shouldRaiseNow) {
+        setActiveHoldSecondsLeft(30);
+        setAudimaxActionNotice(`Barrier raised & plate ${plate} whitelisted for ${lock.name || lock.id}! (30-second hold)`);
+      } else {
+        setAudimaxActionNotice(`Booked ahead for ${formatHardwareInstant(startsAt!)}. Barrier will automatically raise 30s before arrival at ${new Date(raiseAtMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}.`);
+      }
+      await loadAudimaxData();
+      setAudimaxModalOpen(false);
+    } catch (err) {
+      setAudimaxActionNotice(err instanceof Error ? err.message : 'Reservation failed');
+    } finally {
+      setAudimaxActionBusy(false);
+    }
+  };
+
+  const handleAudimaxLeave = async (reason?: string) => {
+    const lockId = activeHold?.lockId || selectedLockId;
+    const isScheduledOnly = activeHold?.status === 'scheduled';
+    setAudimaxActionBusy(true);
+    setAudimaxActionNotice(null);
+    try {
+      if (!isScheduledOnly) {
+        await releaseAudimaxLock(lockId);
+      }
+      await setStoredActiveHold(null);
+      setActiveHold(null);
+      setAudimaxActionNotice(
+        reason ?? (isScheduledOnly ? 'Scheduled booking cancelled.' : 'Barrier lowered & whitelist cleared.')
+      );
+      await loadAudimaxData();
+      setAudimaxModalOpen(false);
+    } catch (err) {
+      setAudimaxActionNotice(err instanceof Error ? err.message : 'Release failed');
+    } finally {
+      setAudimaxActionBusy(false);
+    }
+  };
+  handleAudimaxLeaveRef.current = handleAudimaxLeave;
+
+  const handleAudimaxExtend = async () => {
+    if (!activeHold || activeHold.status !== 'active') return;
+    setAudimaxActionBusy(true);
+    setAudimaxActionNotice(null);
+    try {
+      const currentExpiresMs = Date.parse(activeHold.expiresAt);
+      const newExpiresMs = currentExpiresMs + 30 * 1000;
+      const updated: AudimaxActiveHold = {
+        ...activeHold,
+        expiresAt: new Date(newExpiresMs).toISOString(),
+      };
+      await setStoredActiveHold(updated);
+      setActiveHold(updated);
+      setActiveHoldSecondsLeft(Math.max(0, Math.ceil((newExpiresMs - Date.now()) / 1000)));
+      setAudimaxActionNotice(
+        `Added 30 seconds to arrival window (€1 mock fee applied). Auto-unlock postponed until ${new Date(newExpiresMs).toLocaleTimeString()}.`
+      );
+    } catch (err) {
+      setAudimaxActionNotice(err instanceof Error ? err.message : 'Extension failed');
+    } finally {
+      setAudimaxActionBusy(false);
+    }
+  };
+
+  const handleSelectEventSpot = (spot: EventChargingSpot, event: MunichEvent) => {
+    setActiveEventFilter(event);
+    setEventsModalOpen(false);
+    map.current?.animateToRegion(
+      {
+        latitude: spot.latitude,
+        longitude: spot.longitude,
+        latitudeDelta: 0.02,
+        longitudeDelta: 0.02,
+      },
+      600
+    );
+
+    if (spot.isAudimaxHardware) {
+      selectAudimax();
+      setAudimaxModalOpen(true);
+    } else if (spot.stationId && result?.stations) {
+      const station = result.stations.find(s => s.id === spot.stationId);
+      if (station) {
+        selectDirectoryStation(station);
+      }
+    }
   };
 
   const startPublicReservation = () => {
@@ -469,15 +751,72 @@ export default function MapScreen() {
         onRegionChangeComplete={next => { region.current = next; setOutsideBerlin(Math.abs(next.latitude - INITIAL_REGION.latitude) > 0.04 || Math.abs(next.longitude - INITIAL_REGION.longitude) > 0.04); setAreaChanged(!searchedRegion.current || regionMoved(next, searchedRegion.current)); }}>
         {visibleStations.map(station => <Marker key={station.id} identifier={String(station.id)} coordinate={{ latitude: station.latitude, longitude: station.longitude }} title={station.name} description={directoryCounts[station.id]?.unreserved === null ? `${directoryCounts[station.id]?.total ?? 0} listed plugs · app status unknown` : `${directoryCounts[station.id]?.unreserved ?? 0}/${directoryCounts[station.id]?.total ?? 0} unreserved in BayReady`} pinColor={selected?.id === station.id ? palette.ink : station.faultReported ? palette.errorInk : directoryCounts[station.id]?.unreserved === 0 ? '#A77A24' : directoryCounts[station.id]?.unreserved === null ? '#737D77' : '#739332'} onPress={() => selectDirectoryStation(station)} />)}
         {visibleLocations.map(location => <Marker key={`location-${location.id}`} identifier={`location-${location.id}`} coordinate={{ latitude: location.latitude, longitude: location.longitude }} title={`${location.bays.every(bay => bay.mode === 'demo') ? 'DEMO · ' : ''}${location.label}`} description={`${location.unreservedBayCount} unreserved bays · ${location.connectorCount} compatible connectors`} pinColor={location.unreservedBayCount === 0 ? '#A77A24' : palette.ink} onPress={() => selectLocation(location)} />)}
+        <Marker
+          key="audimax-tum"
+          identifier="audimax-tum"
+          coordinate={AUDIMAX_COORDINATES}
+          title="Audimax TUM · Ecurious Hardware"
+          description={
+            activeHold
+              ? activeHold.status === 'scheduled'
+                ? `Scheduled: ${activeHold.lockName} · Raises at ${new Date(activeHold.raiseAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
+                : activeHold.status === 'occupied'
+                ? `Parked: ${activeHold.lockName} · Vehicle present`
+                : `Waiting for car: ${activeHold.lockName} (${activeHoldSecondsLeft}s left)`
+              : audimaxLocks.length > 0
+              ? `${audimaxLocks.length} bays · ${audimaxLocks.map(l => `${l.name || l.id} (${l.status})`).join(', ')}`
+              : 'Ecurious parking lock · Tap for live status'
+          }
+          pinColor={selectedAudimax ? palette.ink : activeHold ? '#356EAE' : '#9C27B0'}
+          onPress={selectAudimax}
+        />
+        {activeEventFilter ? (
+          <Marker
+            key={`event-${activeEventFilter.id}`}
+            identifier={`event-${activeEventFilter.id}`}
+            coordinate={{ latitude: activeEventFilter.latitude, longitude: activeEventFilter.longitude }}
+            title={`${activeEventFilter.emoji} ${activeEventFilter.title}`}
+            description={`${activeEventFilter.venue} · ${activeEventFilter.expectedAttendance}`}
+            pinColor="#D32F2F"
+          />
+        ) : null}
         {userLocation ? <Marker key="your-location" coordinate={userLocation} title="Your location" pinColor="#356EAE" /> : null}
       </MapView>
 
       <View style={[styles.topRow, { top: insets.top + 12, left: insets.left + 16, right: insets.right + 16 }]} pointerEvents="box-none">
         <Pressable accessibilityRole="button" accessibilityLabel="Open driver profile" onPress={() => router.push('/profile')} style={styles.brandPill}><View style={styles.brandMark}><Text style={styles.bolt}>ϟ</Text></View><View><Text style={styles.brand}>BayReady</Text><Text style={styles.brandCaption}>CHARGERS & BOOKINGS</Text></View></Pressable>
-        <Pressable accessibilityRole="button" accessibilityLabel="Charger filters" accessibilityState={{ expanded: filtersOpen }} onPress={() => setFiltersOpen(open => !open)} style={({ pressed }) => [styles.filterButton, filtersOpen && styles.filterButtonOpen, pressed && ui.pressed]}>
-          <Text style={[styles.filterButtonText, filtersOpen && styles.filterButtonTextOpen]}>☷  Filters{activeFilterCount ? ` · ${activeFilterCount}` : ''}</Text>
-        </Pressable>
+        <View style={styles.topButtons}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Munich Events" onPress={() => setEventsModalOpen(true)} style={({ pressed }) => [styles.filterButton, activeEventFilter && styles.filterButtonOpen, pressed && ui.pressed]}>
+            <Text style={[styles.filterButtonText, activeEventFilter && styles.filterButtonTextOpen]}>{activeEventFilter ? `${activeEventFilter.emoji} Events` : '🎯 Events'}</Text>
+          </Pressable>
+          <Pressable accessibilityRole="button" accessibilityLabel="Charger filters" accessibilityState={{ expanded: filtersOpen }} onPress={() => setFiltersOpen(open => !open)} style={({ pressed }) => [styles.filterButton, filtersOpen && styles.filterButtonOpen, pressed && ui.pressed]}>
+            <Text style={[styles.filterButtonText, filtersOpen && styles.filterButtonTextOpen]}>☷ Filters{activeFilterCount ? ` · ${activeFilterCount}` : ''}</Text>
+          </Pressable>
+        </View>
       </View>
+
+      {activeEventFilter ? (
+        <View style={[styles.eventPillContainer, { top: insets.top + 68, left: insets.left + 16, right: insets.right + 16 }]}>
+          <Pressable onPress={() => setEventsModalOpen(true)} style={styles.eventPill}>
+            <Text style={{ fontSize: 18 }}>{activeEventFilter.emoji}</Text>
+            <View style={ui.flex}>
+              <Text style={styles.eventPillTitle} numberOfLines={1}>
+                {activeEventFilter.title}
+              </Text>
+              <Text style={styles.eventPillSubtitle} numberOfLines={1}>
+                {activeEventFilter.venue} · Top 5 free chargers
+              </Text>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Clear event"
+              onPress={() => setActiveEventFilter(null)}
+              style={styles.eventPillClose}>
+              <Text style={styles.eventPillCloseText}>×</Text>
+            </Pressable>
+          </Pressable>
+        </View>
+      ) : null}
 
       <View style={[styles.searchPosition, { top: insets.top + 80 }]} pointerEvents="box-none">
         <Pressable accessibilityRole="button" accessibilityState={{ disabled: loading || bookings.refreshing, busy: loading || bookings.refreshing }} disabled={loading || bookings.refreshing} onPress={() => { setFiltersOpen(false); void bookings.refresh(); void directoryBookings.refresh(); void search(region.current, minPower, plug); }} style={({ pressed }) => [styles.searchButton, pressed && ui.pressed]}>
@@ -500,7 +839,7 @@ export default function MapScreen() {
         </ScrollView>
       </View> : null}
 
-      {!filtersOpen && !selectedBay && !selectedLocation && !selected ? <View style={[styles.noticePosition, { top: insets.top + 140, left: insets.left + 16, right: insets.right + 16 }]} pointerEvents="box-none">
+      {!filtersOpen && !selectedBay && !selectedLocation && !selected && !selectedAudimax ? <View style={[styles.noticePosition, { top: insets.top + 140, left: insets.left + 16, right: insets.right + 16 }]} pointerEvents="box-none">
         {!bookings.configured && !showDirectoryOnly ? <MapNotice title="Connect bookings to show reservable bays" copy="The booking database is not connected yet. You can explore directory chargers with unknown availability." action="Show directory chargers" onPress={() => setShowDirectoryOnly(true)} /> : null}
         {bookings.configured && (showTestLocation || displayedInventory.some(bay => bay.mode === 'ecurious')) && bookings.error ? <MapNotice title="Booking status needs attention" copy={bookings.error} action="Refresh bookings" onPress={() => void bookings.refresh()} secondaryAction={!showDirectoryOnly ? "Browse directory chargers" : undefined} onSecondaryPress={() => setShowDirectoryOnly(true)} /> : null}
         {bookings.configured && (showTestLocation || displayedInventory.some(bay => bay.mode === 'ecurious')) && !bookings.loading && !bookings.fresh && !bookings.error ? <MapNotice title="Refresh before reserving" copy="Booking status is not current. Unknown bays are hidden until the database responds." action="Refresh bookings" onPress={() => void bookings.refresh()} /> : null}
@@ -613,6 +952,204 @@ export default function MapScreen() {
         </View>
       </View> : null}
 
+      {selectedAudimax && !filtersOpen ? (
+        <View onLayout={event => setDetailHeight(event.nativeEvent.layout.height)} style={[styles.details, { bottom: detailsBottom, left: insets.left + 16, right: insets.right + 16, maxHeight: detailMaxHeight }]}>
+          <ScrollView style={styles.detailScroll} contentContainerStyle={styles.detailsContent} showsVerticalScrollIndicator>
+            <View style={styles.detailHeading}>
+              <View style={ui.flex}>
+                <View style={[styles.bayBadge, { backgroundColor: '#EDE7F6' }]}>
+                  <Text style={[styles.bayBadgeText, { color: '#6A1B9A' }]}>ECURIOUS LIVE HARDWARE · {audimaxTeam.toUpperCase()}</Text>
+                </View>
+                <Text style={styles.stationName}>Audimax Munich (TUM)</Text>
+                <Text style={styles.stationAddress}>Arcisstraße 21, 80333 München</Text>
+              </View>
+              <Pressable accessibilityRole="button" accessibilityLabel="Close Audimax details" onPress={() => setSelectedAudimax(false)} style={styles.closeButton}>
+                <Text style={styles.closeMark}>×</Text>
+              </Pressable>
+            </View>
+
+            {audimaxError ? <Text style={styles.fault}>{audimaxError}</Text> : null}
+            {audimaxActionNotice ? <Text style={styles.bookingNotice}>{audimaxActionNotice}</Text> : null}
+
+            {activeHold ? (
+              <View style={[styles.confirmationSummary, { borderColor: activeHold.status === 'scheduled' ? '#1565C0' : activeHold.status === 'occupied' ? '#2E7D32' : '#8DA93C', borderWidth: 1 }]}>
+                <Text style={[styles.confirmationText, { fontWeight: '700', color: activeHold.status === 'scheduled' ? '#1565C0' : activeHold.status === 'occupied' ? '#2E7D32' : activeHoldSecondsLeft > 0 ? '#2E7D32' : '#C62828' }]}>
+                  {activeHold.status === 'scheduled'
+                    ? '⏰ Scheduled Booking (Barrier raises 30s before)'
+                    : activeHold.status === 'occupied'
+                    ? '🚗 Vehicle Detected in Bay · Occupied'
+                    : activeHoldSecondsLeft > 0
+                    ? `✓ Barrier Raised · Waiting for Car (${activeHoldSecondsLeft}s left)`
+                    : '⚠ 30-Second No-Show Window Expired'}
+                </Text>
+                <Text style={styles.confirmationText}>Bay: {activeHold.lockName} (ID: {activeHold.lockId})</Text>
+                <Text style={styles.confirmationText}>Whitelisted plate: {activeHold.plate}</Text>
+                {activeHold.status === 'scheduled' && activeHold.startsAt ? (
+                  <Text style={styles.confirmationText}>Arrival time: {formatHardwareInstant(activeHold.startsAt)}</Text>
+                ) : null}
+                <Text style={styles.toggleCopy}>
+                  {activeHold.status === 'scheduled'
+                    ? `Barrier automatically raises at ${new Date(activeHold.raiseAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
+                    : activeHold.status === 'occupied'
+                    ? 'Vehicle arrived and is parked in the bay. Barrier is protecting your spot.'
+                    : activeHoldSecondsLeft > 0
+                    ? `Waiting 30 seconds for car arrival. Auto-unlocks if not showing up by ${new Date(activeHold.expiresAt).toLocaleTimeString()} (${activeHoldSecondsLeft}s left)`
+                    : 'Unlocking barrier and clearing whitelist…'}
+                </Text>
+                {activeHold.status === 'active' && activeHoldSecondsLeft > 0 ? (
+                  <View style={{ marginTop: 8 }}>
+                    <Pressable
+                      accessibilityRole="button"
+                      disabled={audimaxActionBusy}
+                      onPress={() => void handleAudimaxExtend()}
+                      style={({ pressed }) => [styles.applyButton, { backgroundColor: '#8DA93C', marginVertical: 4 }, pressed && ui.pressed]}>
+                      <Text style={styles.applyButtonText}>+ Add 30 seconds · €1 fee</Text>
+                    </Pressable>
+                    <Text style={styles.toggleCopy}>Haven't arrived yet? Add 30 more seconds before auto-unlock · €1 mock fee.</Text>
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
+
+            <Text style={styles.filterLabel}>Available Bays / Locks</Text>
+            {audimaxLocks.length === 0 && !audimaxLoading ? (
+              <Text style={styles.stationAddress}>No locks reported by the live service.</Text>
+            ) : (
+              audimaxLocks.map(lock => {
+                const isSelected = selectedLockId === lock.id;
+                const isUserHold = activeHold?.lockId === lock.id;
+                return (
+                  <Pressable
+                    key={lock.id}
+                    accessibilityRole="button"
+                    onPress={() => {
+                      setSelectedLockId(lock.id);
+                      setAudimaxModalOpen(true);
+                    }}
+                    style={({ pressed }) => [
+                      styles.bayChoice,
+                      isSelected && { borderColor: '#9C27B0', backgroundColor: '#F3E5F5' },
+                      isUserHold && { borderColor: '#8DA93C', backgroundColor: '#F0F6DC' },
+                      pressed && ui.pressed,
+                    ]}>
+                    <View style={ui.flex}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <Text style={styles.bayChoiceName}>{lock.name || lock.id}</Text>
+                        {lock.id === PREFERRED_LOCK_ID ? (
+                          <View style={{ backgroundColor: '#9C27B0', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                            <Text style={{ color: '#fff', fontSize: 9, fontWeight: '800' }}>ACTIVE DEMO</Text>
+                          </View>
+                        ) : null}
+                        {isUserHold ? (
+                          <View style={{ backgroundColor: '#739332', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                            <Text style={{ color: '#fff', fontSize: 9, fontWeight: '800' }}>YOUR HOLD</Text>
+                          </View>
+                        ) : null}
+                      </View>
+                      <Text style={styles.bayChoiceCopy}>
+                        Barrier: <Text style={{ fontWeight: '700', color: lock.status === 'raised' ? '#A77A24' : '#2E7D32' }}>{lock.status}</Text>
+                        {' · '}Presence: <Text style={{ fontWeight: '700', color: lock.carPresence === 'occupied' ? '#C62828' : '#2E7D32' }}>{lock.carPresence}</Text>
+                        {lock.hasCamera ? ' · 📷 Camera' : ''}
+                      </Text>
+                      <Text style={[styles.bayChoiceCopy, { marginTop: 2 }]}>
+                        {lock.battery12V !== undefined ? `12V: ${lock.battery12V}V` : ''}
+                        {lock.signalStrength4G !== undefined ? ` · 4G: ${lock.signalStrength4G}` : ''}
+                        {lock.waterIngress ? ' · ⚠ Water alert' : ''}
+                        {lock.activeErrors && lock.activeErrors.length > 0 ? ` · ⚠ Errors: ${lock.activeErrors.join(', ')}` : ''}
+                      </Text>
+                    </View>
+                    <View style={styles.bayChoiceEnd}>
+                      <Text style={[styles.bayChoiceStatus, isSelected && { color: '#9C27B0' }]}>
+                        {isUserHold ? 'Active' : isSelected ? 'Selected ✓' : 'Select'}
+                      </Text>
+                      <Text style={styles.choiceArrow}>›</Text>
+                    </View>
+                  </Pressable>
+                );
+              })
+            )}
+
+            <View style={styles.confirmationSummary}>
+              <Text style={styles.confirmationText}>
+                Driver plate: <Text style={{ fontWeight: '700' }}>{profile?.licensePlate?.trim() || 'MBD14E (Default test plate)'}</Text>
+              </Text>
+              {!profile?.licensePlate?.trim() ? (
+                <Link href="/profile" asChild>
+                  <Pressable accessibilityRole="button">
+                    <Text style={styles.noticeActionText}>Set custom plate in Profile ›</Text>
+                  </Pressable>
+                </Link>
+              ) : null}
+            </View>
+
+            <Text style={styles.noAvailability}>
+              Live Ecurious hardware lock. Reserving sends a lock command to raise the barrier and adds your plate to the whitelist. Leaving clears the whitelist and lowers the barrier.
+            </Text>
+          </ScrollView>
+
+          <View style={styles.bookingActions}>
+            <View style={{ gap: 8 }}>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => setAudimaxModalOpen(true)}
+                style={({ pressed }) => [
+                  styles.applyButton,
+                  pressed && ui.pressed,
+                ]}>
+                <Text style={styles.applyButtonText}>
+                  {activeHold ? 'Manage / Leave reservation' : 'Reserve now or book ahead'}
+                </Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => void loadAudimaxData()}
+                disabled={audimaxLoading}
+                style={({ pressed }) => [styles.cancelButton, pressed && ui.pressed]}>
+                <Text style={styles.cancelButtonText}>{audimaxLoading ? 'Refreshing…' : 'Refresh hardware status'}</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      ) : null}
+
+      <AudimaxBookingModal
+        visible={audimaxModalOpen}
+        lock={audimaxLocks.find(l => l.id === selectedLockId) ?? audimaxLocks[0]}
+        allLocks={audimaxLocks}
+        team={audimaxTeam}
+        profile={profile}
+        activeHold={activeHold}
+        busy={audimaxActionBusy}
+        error={audimaxError}
+        notice={audimaxActionNotice}
+        onSelectLock={id => setSelectedLockId(id)}
+        onReserve={async choice => {
+          await handleAudimaxReserve(choice);
+        }}
+        onExtend={async () => {
+          await handleAudimaxExtend();
+        }}
+        onLeave={async () => {
+          await handleAudimaxLeave();
+        }}
+        onClose={() => setAudimaxModalOpen(false)}
+        onProfile={() => {
+          setAudimaxModalOpen(false);
+          router.push('/profile');
+        }}
+      />
+
+      <MunichEventsModal
+        visible={eventsModalOpen}
+        selectedEvent={selectedEvent}
+        audimaxLocks={audimaxLocks}
+        directoryStations={result?.stations}
+        directoryCounts={directoryCounts}
+        onSelectEvent={event => setSelectedEvent(event)}
+        onSelectSpot={handleSelectEventSpot}
+        onClose={() => setEventsModalOpen(false)}
+      />
+
       {showDirectoryConfirmation && selected && selectedReportedGroup && selectedListedPlug ? <DirectoryBookingModal visible title={selected.name} plugLabel={connectorLabel(selectedReportedGroup.type) + ' · app plug ' + selectedListedPlug.ordinal + ' of ' + selectedReportedGroup.count + ' · ' + displayPower(selectedReportedGroup.power)} profile={profile} now={directoryClockNow} fresh={selectedDirectoryFresh} busy={directoryBookings.busy} nowAllowed={!selectedDirectoryHold} error={directoryBookings.error} unavailableReason={selected.faultReported ? 'A fault is reported for this location. New reservations are disabled; your existing app bookings can still be cancelled from Filters.' : undefined} onConfirm={reserveListedPlug} onClose={() => setDirectoryConfirming(false)} onChangePlug={() => { automaticPlugSelection.current = false; setDirectoryConfirming(false); }} onProfile={() => { setDirectoryConfirming(false); router.push('/profile'); }} onRefresh={() => void directoryBookings.refresh()} onSource={() => void openSource(selected.url)} /> : null}
 
       {myBookingsOpen ? <DirectoryBookingsList visible bookings={ownDirectoryBookings} activeIds={new Set(directoryHolds.filter(hold => hold.isMine && hold.myReservationId).map(hold => hold.myReservationId!))} now={directoryClockNow} fresh={directoryBookings.fresh} busy={directoryBookings.busy} loading={directoryBookings.loading} error={directoryBookings.error} labelFor={listedHoldLabel} onClose={() => setMyBookingsOpen(false)} onRefresh={() => void directoryBookings.refresh()} onExtend={id => void extendListedHold(id)} onCancel={id => void cancelListedHold(id)} /> : null}
@@ -645,15 +1182,16 @@ function MapNotice({ title, copy, action, onPress, secondaryAction, onSecondaryP
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: palette.soft },
   map: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
-  topRow: { position: 'absolute', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
-  brandPill: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: palette.paper, borderRadius: 22, paddingVertical: 9, paddingHorizontal: 11, elevation: 4, shadowColor: palette.ink, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.12, shadowRadius: 5 },
-  brandMark: { width: 29, height: 32, backgroundColor: palette.lime, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  bolt: { color: palette.ink, fontSize: 28, fontWeight: '800', lineHeight: 30 },
-  brand: { color: palette.ink, fontSize: 19, fontWeight: '800', letterSpacing: -0.6 },
-  brandCaption: { color: palette.muted, fontSize: 8, fontWeight: '700', letterSpacing: 0.8, marginTop: 2 },
-  filterButton: { minHeight: 48, paddingHorizontal: 15, borderRadius: 24, backgroundColor: palette.paper, justifyContent: 'center', elevation: 4, shadowColor: palette.ink, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.12, shadowRadius: 5 },
+  topRow: { position: 'absolute', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6 },
+  topButtons: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 },
+  brandPill: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: palette.paper, borderRadius: 20, paddingVertical: 6, paddingHorizontal: 9, elevation: 4, shadowColor: palette.ink, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.12, shadowRadius: 5, flexShrink: 1 },
+  brandMark: { width: 26, height: 28, backgroundColor: palette.lime, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  bolt: { color: palette.ink, fontSize: 24, fontWeight: '800', lineHeight: 26 },
+  brand: { color: palette.ink, fontSize: 16, fontWeight: '800', letterSpacing: -0.5 },
+  brandCaption: { color: palette.muted, fontSize: 7, fontWeight: '700', letterSpacing: 0.6, marginTop: 1 },
+  filterButton: { minHeight: 40, paddingHorizontal: 10, borderRadius: 20, backgroundColor: palette.paper, justifyContent: 'center', alignItems: 'center', elevation: 4, shadowColor: palette.ink, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.12, shadowRadius: 5 },
   filterButtonOpen: { backgroundColor: palette.ink },
-  filterButtonText: { fontSize: 14, fontWeight: '700', color: palette.ink },
+  filterButtonText: { fontSize: 12, fontWeight: '700', color: palette.ink },
   filterButtonTextOpen: { color: palette.lime },
   filterPanel: { position: 'absolute', width: 304, maxWidth: '90%', backgroundColor: palette.paper, borderWidth: 1, borderColor: palette.line, borderRadius: 23, elevation: 7, shadowColor: palette.ink, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 10 },
   filterContent: { padding: 17, gap: 12 },
@@ -760,4 +1298,10 @@ const styles = StyleSheet.create({
   resultCount: { color: palette.muted, fontSize: 10 },
   footerCopy: { color: palette.muted, fontSize: 9, lineHeight: 14 },
   linkError: { color: palette.errorInk, fontSize: 12, lineHeight: 17 },
+  eventPillContainer: { position: 'absolute', zIndex: 10 },
+  eventPill: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#FFFFFF', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: '#D4E2BA', shadowColor: palette.ink, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.12, shadowRadius: 4, elevation: 4 },
+  eventPillTitle: { fontSize: 12, fontWeight: '800', color: palette.ink },
+  eventPillSubtitle: { fontSize: 10, color: '#2E7D32', fontWeight: '600' },
+  eventPillClose: { width: 22, height: 22, borderRadius: 11, backgroundColor: palette.soft, alignItems: 'center', justifyContent: 'center' },
+  eventPillCloseText: { fontSize: 14, color: palette.ink, fontWeight: '800', lineHeight: 16 },
 });
