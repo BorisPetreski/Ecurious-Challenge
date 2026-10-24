@@ -38,16 +38,33 @@ test('phone normalization requires an international country code and 7 to 15 dig
   }
 });
 
-test('required profile fields reject invalid types, control characters, and unsupported selections', () => {
+test('optional contact fields may be omitted or blank without blocking a car profile', () => {
+  const result = validateProfileInput({ licensePlate: 'DEMO-42', connectorType: 'CCS', paymentMethod: 'mock-card' });
+  assert.equal(result.valid, true);
+  assert.deepEqual([result.value.name, result.value.email, result.value.phone], ['', '', '']);
+  assert.equal(validateProfileInput({ ...input, name: ' ', email: '', phone: '' }).valid, true);
+});
+
+test('software hold preferences do not require a plate, while supplied plate values remain validated', () => {
+  const minimal = validateProfileInput({ connectorType: 'CCS', paymentMethod: 'mock-card' });
+  assert.equal(minimal.valid, true);
+  assert.equal(minimal.value.licensePlate, '');
+  assert.equal(validateProfileInput({ ...input, licensePlate: '   ' }).value.licensePlate, '');
+  for (const licensePlate of [null, 42, false, 'A', 'AB/12']) {
+    assert.equal(validateProfileInput({ ...input, licensePlate }).valid, false);
+  }
+});
+
+test('supplied fields reject invalid types, control characters, and unsupported selections', () => {
   for (const patch of [
-    { name: '' }, { name: 'A'.repeat(101) }, { name: 'Example\u0000Driver' },
+    { name: 'A'.repeat(101) }, { name: 'Example\u0000Driver' }, { name: 42 }, { name: null },
     { email: 'driver-at-example.com' }, { email: 'driver@example' },
-    { email: `${'a'.repeat(249)}@x.com` }, { phone: 4915123456789 },
+    { email: `${'a'.repeat(249)}@x.com` }, { email: false }, { email: null }, { phone: 4915123456789 }, { phone: null },
     { connectorType: 'Other' }, { paymentMethod: 'real-card' },
   ]) assert.equal(validateProfileInput({ ...input, ...patch }).valid, false);
   const missing = validateProfileInput(null);
   assert.equal(missing.valid, false);
-  assert.equal(Object.keys(missing.errors).length, 6);
+  assert.equal(Object.keys(missing.errors).length, 2);
 });
 
 test('stored profile restoration requires supported version, valid details, and an exact UTC timestamp', () => {
@@ -55,9 +72,10 @@ test('stored profile restoration requires supported version, valid details, and 
   assert.deepEqual(parseDriverProfile(JSON.parse(JSON.stringify(profile))), profile);
   for (const patch of [
     { version: 2 }, { updatedAt: 'yesterday' }, { updatedAt: '2026-02-30T12:00:00.000Z' },
-    { updatedAt: '2026-10-24T14:00:00+02:00' }, { licensePlate: '' },
+    { updatedAt: '2026-10-24T14:00:00+02:00' }, { licensePlate: null },
   ]) assert.equal(parseDriverProfile({ ...profile, ...patch }), null);
   assert.equal(parseDriverProfile([]), null);
+  assert.deepEqual(parseDriverProfile({ ...profile, licensePlate: '' }), { ...profile, licensePlate: '' });
 });
 
 test('saved profile contains only local preference fields and fits one native secure-storage value', () => {

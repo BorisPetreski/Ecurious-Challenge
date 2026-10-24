@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ActionButton, AppScreen, ConnectionNotice, SectionHeading, ui } from '@/components/bayready-ui';
@@ -24,6 +25,8 @@ export default function ActivityScreen() {
       </View>
 
       <ConnectionNotice />
+
+      <Link href="/simulation" asChild><Pressable accessibilityRole="button" style={StyleSheet.flatten([ui.button, ui.darkButton])}><Text style={[ui.buttonText, ui.darkButtonText]}>Open multi-car Scenario lab</Text></Pressable></Link>
 
       <HardwareStatus />
 

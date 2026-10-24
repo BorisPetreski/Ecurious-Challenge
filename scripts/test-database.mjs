@@ -11,6 +11,12 @@ const containerName = `bayready-reservations-test-${process.pid}-${ownerToken.sl
 const ownerLabel = 'com.bayready.test.owner';
 const image = 'postgres:17-alpine';
 const bookingOptionsOnly = process.argv.includes('--booking-options-only');
+const arrivalGraceOnly = process.argv.includes('--arrival-grace-only');
+const multiCarOnly = process.argv.includes('--multi-car-only');
+const privacyOnly = process.argv.includes('--privacy-only');
+const barrierTestOnly = process.argv.includes('--barrier-test-only');
+const waitForTelemetryOnly = process.argv.includes('--wait-for-telemetry-only');
+const focusedOnly = bookingOptionsOnly || arrivalGraceOnly || multiCarOnly || privacyOnly || barrierTestOnly || waitForTelemetryOnly;
 const activeChildren = new Set();
 let interrupted = false;
 let cleaningUp = false;
@@ -349,7 +355,7 @@ async function runHardwareSlotRaces() {
   const connectorA = 'a0000000-0000-4000-8000-000000000011';
   const connectorB = 'a0000000-0000-4000-8000-000000000012';
   const firstStart = new Date(Date.now() + 3600_000).toISOString();
-  const firstEnd = new Date(Date.parse(firstStart) + 20 * 60_000).toISOString();
+  const firstEnd = new Date(Date.parse(firstStart) + 10 * 60_000).toISOString();
   const request = 'accccccc-cccc-4ccc-8ccc-ccccccccccc1';
   const sql = (owner, connector, key, start, end, marker) => `
     begin; set local role authenticated; set local "request.jwt.claim.sub"='${owner}';
@@ -364,7 +370,7 @@ async function runHardwareSlotRaces() {
   assert.match(lost.stderr, /SLOT_RESERVED/);
 
   const nextStart = new Date(Date.parse(firstEnd) + 10 * 60_000).toISOString();
-  const nextEnd = new Date(Date.parse(nextStart) + 20 * 60_000).toISOString();
+  const nextEnd = new Date(Date.parse(nextStart) + 10 * 60_000).toISOString();
   const retryKey = 'accccccc-cccc-4ccc-8ccc-ccccccccccc3';
   const retryFirst = psql(sql(ownerA, connectorA, retryKey, nextStart, nextEnd, 'SCHEDULE_RETRY_LOCKED'), { marker: 'SCHEDULE_RETRY_LOCKED' });
   await retryFirst.markerSeen;
@@ -381,6 +387,59 @@ async function runHardwareSlotRaces() {
     'operations',(select count(*) from public.hardware_operations where bay_id='${bay}'));`, 'Verify schedule race rows'));
   assert.deepEqual(counts, { scheduled: 2, operations: 1 });
   console.log('PASS scheduled-slot races: whole-bay exclusion across plugs; identical retry preserves one window; no early operation');
+}
+
+async function runMultiCarRace() {
+  const ownerA = 'e1111111-1111-4111-8111-111111111111';
+  const ownerB = 'e2222222-2222-4222-8222-222222222222';
+  const location = 'e0000000-0000-4000-8000-000000000100';
+  const bay = 'e0000000-0000-4000-8000-000000000001';
+  const connectorA = 'e0000000-0000-4000-8000-000000000011';
+  const connectorB = 'e0000000-0000-4000-8000-000000000012';
+  const startsAt = new Date(Date.now() + 3600_000).toISOString();
+  const endsAt = new Date(Date.parse(startsAt) + 600_000).toISOString();
+  await executeSql(`
+    insert into auth.users(id) values ('${ownerA}'), ('${ownerB}');
+    insert into public.charging_locations(id,label) values ('${location}','Fictional two-car race');
+    insert into public.bookable_bays(id,location_id,label,integration_mode,ecurious_lock_id,enabled)
+      values ('${bay}','${location}','Fictional shared parking bay','ecurious','fictional-two-car-race',true);
+    insert into public.bay_connectors(id,bay_id,label,connector_type,power_kw,enabled) values
+      ('${connectorA}','${bay}','Fictional CCS 1','CCS',150,true),
+      ('${connectorB}','${bay}','Fictional CCS 2','CCS',150,true);
+    insert into public.hardware_controls(bay_id,enabled,interlocks_confirmed) values ('${bay}',true,true);
+  `, 'Create distinct fictional drivers and one two-connector bay');
+  const request = (owner, connector, key, fingerprint, marker) => `
+    begin;
+    set local role authenticated;
+    set local "request.jwt.claim.sub"='${owner}';
+    select public.request_hardware_slot('${bay}','${connector}','${startsAt}','${endsAt}',
+      '${key}','${fingerprint.repeat(64)}','•••${fingerprint === 'a' ? '11' : '22'}','scheduled');
+    ${marker ? `select '${marker}'; select pg_catalog.pg_sleep(1);` : ''}
+    commit;`;
+  const first = psql(request(ownerA, connectorA, 'eeeeeeee-bbbb-4bbb-8bbb-bbbbbbbbbbb1', 'a', 'TWO_CAR_WINDOW_LOCKED'),
+    { marker: 'TWO_CAR_WINDOW_LOCKED' });
+  await first.markerSeen;
+  assert.equal(first.ended, false, 'Driver A must still hold the transaction when driver B starts.');
+  const second = psql(request(ownerB, connectorB, 'eeeeeeee-bbbb-4bbb-8bbb-bbbbbbbbbbb2', 'b'));
+  const [won, lost] = await Promise.all([first.done, second.done]);
+  const slotA = jsonResult(requireSuccess(won, 'Driver A scheduled booking')).slot;
+  assert.notEqual(lost.code, 0, 'Driver B must lose the overlapping whole-bay race.');
+  assert.match(lost.stderr, /SLOT_RESERVED/);
+  const snapshot = jsonResult(await executeSql(`select jsonb_build_object(
+    'slots',(select count(*) from public.hardware_slot_bookings where bay_id='${bay}'),
+    'correctOwnerAndCar',(select bool_and(owner_id='${ownerA}'::uuid and plate_hash=repeat('a',64))
+      from public.hardware_slot_bookings where bay_id='${bay}'),
+    'physicalAllocations',(select count(*) from public.booking_reservations where bay_id='${bay}'),
+    'operations',(select count(*) from public.hardware_operations where bay_id='${bay}'));`,
+  'Verify two-car race and absence of early physical operations'));
+  assert.deepEqual(snapshot, { slots: 1, correctOwnerAndCar: true, physicalAllocations: 0, operations: 0 });
+  await executeSql(`begin; set local role authenticated; set local "request.jwt.claim.sub"='${ownerA}';
+    select public.cancel_hardware_slot('${slotA.id}'); commit;`, 'Driver A cancels the unactivated future window');
+  const slotB = jsonResult(await executeSql(request(ownerB, connectorB,
+    'eeeeeeee-bbbb-4bbb-8bbb-bbbbbbbbbbb3', 'b'), 'Driver B books after owner cancellation')).slot;
+  assert.equal(slotB.connectorId, connectorB);
+  assert.notEqual(slotB.id, slotA.id);
+  console.log('PASS two real PostgreSQL sessions: distinct drivers/cars compete across one bay’s plugs; one winner, no early hardware, next owner succeeds after cancellation');
 }
 
 let failure;
@@ -425,34 +484,56 @@ try {
   assert.ok(migrations.length, 'No database migrations found.');
   for (const migration of migrations) {
     await executeSql(await readFile(new URL(migration, migrationDirectory), 'utf8'), `Apply ${migration}`);
-    if (!bookingOptionsOnly && migration === '20261024120000_bayready_reservations.sql') {
+    if (!focusedOnly && migration === '20261024120000_bayready_reservations.sql') {
       await executeSql(await readFile(new URL('supabase/tests/reservation_contract.sql', root), 'utf8'), 'Original reservation SQL contract assertions');
       await executeSql(await readFile(new URL('supabase/tests/pre_hierarchy_fixture.sql', root), 'utf8'), 'Seed fictional upgrade history');
     }
-    if (!bookingOptionsOnly && migration === '20261024170000_plate_arrival_deadline.sql') {
+    if (!focusedOnly && migration === '20261024170000_plate_arrival_deadline.sql') {
       await executeSql(await readFile(new URL('supabase/tests/hardware_slots_contract.sql', root), 'utf8'), 'Original scheduled-slot lifecycle before option upgrade');
     }
+    if (!focusedOnly && migration === '20261024140000_directory_plug_holds.sql') {
+      await executeSql(await readFile(new URL('supabase/tests/directory_contract.sql', root), 'utf8'), 'Original variable-duration directory holds before option upgrade');
+    }
+    if (!arrivalGraceOnly && !multiCarOnly && !privacyOnly && !barrierTestOnly && !waitForTelemetryOnly && migration === '20261024180000_booking_options.sql') {
+      await executeSql(await readFile(new URL('supabase/tests/booking_options_contract.sql', root), 'utf8'), 'Fixed-price booking options and safe physical fallback');
+    }
+    if (!focusedOnly && migration === '20261024190000_directory_booking_options.sql') {
+      await executeSql(await readFile(new URL('supabase/tests/hardware_contract.sql', root), 'utf8'), 'Original durable hardware workflow contract');
+    }
   }
-  await executeSql(await readFile(new URL('supabase/tests/booking_options_contract.sql', root), 'utf8'), 'Fixed-price booking options and safe physical fallback');
-  if (!bookingOptionsOnly) {
+  if (!bookingOptionsOnly && !multiCarOnly && !privacyOnly && !barrierTestOnly && !waitForTelemetryOnly) await executeSql(await readFile(new URL('supabase/tests/arrival_grace_contract.sql', root), 'utf8'), 'Arrival grace and accepted matching-entry retention');
+  if (waitForTelemetryOnly || !focusedOnly) {
+    await executeSql(await readFile(new URL('supabase/tests/wait_for_device_telemetry_contract.sql', root), 'utf8'),
+      'Pending intents during unknown telemetry and unchanged fresh/full guards');
+    console.log('PASS telemetry-wait SQL: stale intents stay pending; fresh safe activation/fallback and known-full refund preserved');
+  }
+  if (barrierTestOnly || !focusedOnly) {
+    await executeSql(await readFile(new URL('supabase/tests/barrier_test_contract.sql', root), 'utf8'),
+      'Barrier-only interface constraints, default-disabled enrollment and durable session');
+    console.log('PASS barrier-test SQL: explicit0kW exception, real-power constraints and unchanged guarded lifecycle; no hardware called');
+  }
+  if (privacyOnly || !focusedOnly) {
+    await executeSql(await readFile(new URL('supabase/tests/privacy_contract.sql', root), 'utf8'),
+      'Owner-scoped export, idempotent erasure intake and unchanged physical/Auth state');
+    console.log('PASS privacy SQL: owner-isolated exports, private permissions, idempotent review request; Auth and physical guards unchanged');
+  }
+  if (multiCarOnly || !focusedOnly) {
+    await executeSql(await readFile(new URL('supabase/tests/multi_car_contract.sql', root), 'utf8'), 'Distinct drivers, plate matching, occupied-bay ownership and alternatives');
+    console.log('PASS multi-car SQL: owner isolation, wrong/correct car, sensor departure, cleanup, fallback and mock refund');
+    await runMultiCarRace();
+  }
+  if (!focusedOnly) await executeSql(await readFile(new URL('supabase/tests/directory_options_contract.sql', root), 'utf8'), 'Directory booking options');
+  if (!focusedOnly) {
   await executeSql(
     await readFile(new URL('supabase/tests/hierarchy_contract.sql', root), 'utf8'),
     'Location, bay and connector SQL assertions',
-  );
-  await executeSql(
-    await readFile(new URL('supabase/tests/directory_contract.sql', root), 'utf8'),
-    'App-only directory hold SQL assertions',
-  );
-  await executeSql(
-    await readFile(new URL('supabase/tests/hardware_contract.sql', root), 'utf8'),
-    'Durable hardware workflow SQL assertions',
   );
   console.log('PASS migrations, auth/permissions, ownership, cancellation, expiry, and validation');
   await runRaces();
   await runDirectoryRaces();
   await runHardwareRaces();
   await runHardwareSlotRaces();
-  } else console.log('PASS seven migrations and targeted booking-option contracts; no hardware called');
+  } else console.log('PASS migrations and focused booking contracts; no hardware called');
 } catch (error) {
   failure = error;
 } finally {

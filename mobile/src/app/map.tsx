@@ -9,11 +9,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ui } from '@/components/bayready-ui';
 import { useBookings } from '@/components/bookings-provider';
 import { useProfile } from '@/components/profile-provider';
+import { DirectoryBookingsList } from '@/components/directory-bookings-list';
+import { DirectoryBookingModal, type DirectoryBookingChoice } from '@/components/directory-booking-form';
 import { palette } from '@/constants/bayready';
 import { useDirectoryBookings } from '@/hooks/use-directory-bookings';
 import type { BayAvailability } from '@/lib/bookings-api';
 import { fetchDirectory, type DirectoryRegion, type DirectoryResult, type DirectoryStation } from '@/lib/goingelectric-api';
 import { groupRegisteredLocations, matchingConnectors, type RegisteredLocation } from '@/lib/map-inventory';
+import { formatHardwareInstant } from '@/lib/hardware-time';
 import { buildDirectorySlotGroups, directoryGroupStatus, directorySlotKey, directorySlotOrdinal, directorySlotPage, type DirectorySlotGroup, type DirectorySlotHold } from '@/lib/directory-slots';
 
 // Expo replaces this public directory key at bundle time. Hardware keys stay on the backend.
@@ -89,6 +92,7 @@ export default function MapScreen() {
   const [preparingSlots, setPreparingSlots] = useState(false);
   const [selected, setSelected] = useState<DirectoryStation | null>(null);
   const [selectedListedPlug, setSelectedListedPlug] = useState<{ stationId: number; prefix: string; ordinal: number } | null>(null);
+  const automaticPlugSelection = useRef(false);
   const selectedListedPlugRef = useRef(selectedListedPlug);
   selectedListedPlugRef.current = selectedListedPlug;
   const [directoryConfirming, setDirectoryConfirming] = useState(false);
@@ -110,6 +114,7 @@ export default function MapScreen() {
   const minPowerRef = useRef(minPower);
   minPowerRef.current = minPower;
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [myBookingsOpen, setMyBookingsOpen] = useState(false);
   const [includeFaults, setIncludeFaults] = useState(false);
   const [showReserved, setShowReserved] = useState(false);
   const [showDirectoryOnly, setShowDirectoryOnly] = useState(true);
@@ -317,6 +322,7 @@ export default function MapScreen() {
   ) ?? [] : [];
   const reservedBays = bookings.fresh ? displayedInventory.filter(bay => bay.availability === 'reserved') : [];
   const directoryHolds = directoryBookings.snapshot?.holds ?? [];
+  const ownDirectoryBookings = directoryBookings.snapshot?.myBookings ?? [];
   const reportedGroups = selected ? slotCatalog[selected.id]?.filter(group => (plug === undefined || group.type === plug) && (minPower === undefined || group.power >= minPower)) ?? [] : [];
   const reportedPlugCount = selected ? directoryCounts[selected.id]?.total ?? 0 : 0;
   const reportedMaxPower = reportedGroups.length ? Math.max(...reportedGroups.map(group => group.power)) : null;
@@ -324,17 +330,27 @@ export default function MapScreen() {
   const selectedReportedGroup = reportedGroups.find(group => group.prefix === selectedGroupPrefix) ?? null;
   const selectedSlotKey = selectedReportedGroup && selectedListedPlug && selectedListedPlug.ordinal <= selectedReportedGroup.count ? directorySlotKey(selectedReportedGroup, selectedListedPlug.ordinal) : null;
   const selectedDirectoryHold = selected && selectedSlotKey ? holdsByStation.get(selected.id)?.find(hold => hold.slotKey === selectedSlotKey) ?? null : null;
+  const selectedOwnDirectoryBooking = selectedDirectoryHold?.myReservationId ? ownDirectoryBookings.find(booking => booking.id === selectedDirectoryHold.myReservationId) ?? null : null;
   const selectedDirectoryFresh = !!selected && directoryCounts[selected.id]?.unreserved !== null && directoryCounts[selected.id]?.unreserved !== undefined;
-  const directoryConfirmationAllowed = !!profile && !!selected && !!selectedSlotKey && selectedDirectoryFresh && !selectedDirectoryHold && !selected.faultReported;
-  const showDirectoryConfirmation = directoryConfirming && directoryConfirmationAllowed;
+  const directoryConfirmationAllowed = !!profile && !!selected && !!selectedSlotKey && selectedDirectoryFresh && !selected.faultReported;
+  const showDirectoryConfirmation = directoryConfirming && !!selected && !!selectedSlotKey;
   const selectedGroupStatus = selectedReportedGroup ? directoryGroupStatus(selectedReportedGroup, selected ? holdsByStation.get(selected.id) ?? [] : [], selectedDirectoryFresh) : null;
   const listedPageTotal = selectedReportedGroup ? selectedDirectoryFresh && !showReserved ? selectedGroupStatus?.unreserved ?? 0 : selectedReportedGroup.count : 0;
   const effectiveListedPage = Math.min(listedPlugPage, Math.max(0, Math.ceil(listedPageTotal / 12) - 1));
   const listedPage = selectedReportedGroup ? directorySlotPage(selectedReportedGroup, selected ? holdsByStation.get(selected.id) ?? [] : [], { fresh: selectedDirectoryFresh, showReserved, page: effectiveListedPage }) : { ordinals: [], total: 0 };
 
   useEffect(() => {
-    if (directoryConfirming && !directoryConfirmationAllowed) setDirectoryConfirming(false);
-  }, [directoryConfirming, directoryConfirmationAllowed]);
+    if (!selected || reportedGroups.length === 0) return;
+    const alreadySelected = selectedListedPlug?.stationId === selected.id;
+    if (alreadySelected && (!automaticPlugSelection.current || !selectedDirectoryFresh || !selectedDirectoryHold || selectedDirectoryHold.isMine)) return;
+    const holds = holdsByStation.get(selected.id) ?? [];
+    const group = reportedGroups.find(item => directoryGroupStatus(item, holds, selectedDirectoryFresh).unreserved !== 0) ?? reportedGroups[0];
+    const page = directorySlotPage(group, holds, { fresh: selectedDirectoryFresh, showReserved: false, page: 0 });
+    const ordinal = page.ordinals[0] ?? 1;
+    if (alreadySelected && selectedListedPlug.prefix === group.prefix && selectedListedPlug.ordinal === ordinal) return;
+    setSelectedListedPlug({ stationId: selected.id, prefix: group.prefix, ordinal });
+    setDirectoryConfirming(true);
+  }, [holdsByStation, reportedGroups, selected, selectedDirectoryFresh, selectedDirectoryHold, selectedListedPlug]);
   const visibleBayCount = visibleLocations.reduce((count, location) => count + location.unreservedBayCount, 0);
   const activeFilterCount = Number(minPower !== undefined) + Number(includeFaults) + Number(showReserved) + Number(!showDirectoryOnly) + Number(showTestLocation);
   const navigationBottom = insets.bottom + sourceHeight + 26;
@@ -390,24 +406,33 @@ export default function MapScreen() {
   };
 
   const selectListedGroup = (group: DirectorySlotGroup) => {
+    automaticPlugSelection.current = false;
     const page = directorySlotPage(group, holdsByStation.get(group.stationId) ?? [], { fresh: selectedDirectoryFresh, showReserved, page: 0 });
     setSelectedListedPlug({ stationId: group.stationId, prefix: group.prefix, ordinal: page.ordinals[0] ?? 1 });
     setListedPlugPage(0);
-    setDirectoryConfirming(false);
+    setDirectoryConfirming(true);
     setDirectoryNotice(null);
   };
 
-  const reserveListedPlug = async () => {
-    if (!profile) { router.push('/profile'); return; }
-    if (!selected || !selectedSlotKey || !directoryConfirmationAllowed) return;
+  const reserveListedPlug = async (choice: DirectoryBookingChoice): Promise<boolean> => {
+    if (!profile) { router.push('/profile'); return false; }
+    if (!selected || !selectedSlotKey || !directoryConfirmationAllowed || choice.bookingMode === 'now' && selectedDirectoryHold) return false;
     const stationId = selected.id;
     const slotKey = selectedSlotKey;
     const selection = selectedListedPlugRef.current;
+    automaticPlugSelection.current = false;
     setDirectoryNotice(null);
-    const saved = await directoryBookings.reserve(stationId, slotKey, holdMinutes);
-    if (!mounted.current || selectedListedPlugRef.current?.stationId !== selection?.stationId || selectedListedPlugRef.current?.prefix !== selection?.prefix || selectedListedPlugRef.current?.ordinal !== selection?.ordinal) return;
-    setDirectoryConfirming(false);
-    if (saved?.status === 'held' && saved.stationId === stationId && saved.slotKey === slotKey) setDirectoryNotice('Your app-only plug hold was saved. Physical availability remains unverified.');
+    const saved = await directoryBookings.reserveBooking(stationId, slotKey, choice);
+    if (!mounted.current || selectedListedPlugRef.current?.stationId !== selection?.stationId || selectedListedPlugRef.current?.prefix !== selection?.prefix || selectedListedPlugRef.current?.ordinal !== selection?.ordinal) return false;
+    if (saved?.status === 'held' && saved.stationId === stationId && saved.slotKey === slotKey) { setDirectoryConfirming(false); setMyBookingsOpen(true); setDirectoryNotice(choice.bookingMode === 'scheduled' ? 'Scheduled for ' + formatHardwareInstant(saved.startsAt) : 'Reserved until ' + untilTime(saved.expiresAt).replace('Until ', '')); return true; }
+    return false;
+  };
+
+  const extendListedHold = async (id: string) => {
+    if (!directoryBookings.fresh) return;
+    setDirectoryNotice(null);
+    const saved = await directoryBookings.extend(id);
+    if (saved?.status === 'held' && mounted.current) setDirectoryNotice('Extended until ' + formatHardwareInstant(saved.expiresAt));
   };
 
   const cancelListedHold = async (id: string) => {
@@ -417,10 +442,24 @@ export default function MapScreen() {
     if (saved && mounted.current) setDirectoryNotice('Your app-only plug hold was cancelled.');
   };
 
-  const listedHoldLabel = (hold: DirectorySlotHold) => {
+  const listedHoldLabel = (hold: Pick<DirectorySlotHold, 'stationId' | 'slotKey'>) => {
     const station = result?.stations.find(item => item.id === hold.stationId);
     const group = slotCatalog[hold.stationId]?.find(item => directorySlotOrdinal(item, hold.slotKey) !== null);
     return { station: station?.name ?? `Station #${hold.stationId}`, plug: group ? `${connectorLabel(group.type)} · app plug ${directorySlotOrdinal(group, hold.slotKey)}` : 'App plug · outside current inventory' };
+  };
+
+  const selectDirectoryStation = (station: DirectoryStation) => {
+    automaticPlugSelection.current = true;
+    setSelected(station); setSelectedListedPlug(null); setListedPlugPage(0); setDirectoryConfirming(false); setDirectoryNotice(null);
+    setSelectedLocationId(null); setSelectedBayId(null); setSelectedConnectorId(null); setConfirming(false); setFiltersOpen(false);
+  };
+
+  const startPublicReservation = () => {
+    if (selected && selectedSlotKey) { setFiltersOpen(false); setDirectoryConfirming(true); return; }
+    const station = selected ?? visibleStations.find(item => !item.faultReported && (directoryCounts[item.id]?.unreserved ?? 1) > 0) ?? visibleStations[0];
+    if (station) { selectDirectoryStation(station); return; }
+    setLocationMessage('Search this area, then tap a charger to reserve an app plug.');
+    if (!loading && DIRECTORY_KEY) void search(region.current, minPower, plug);
   };
 
   return (
@@ -428,13 +467,13 @@ export default function MapScreen() {
       <MapView ref={map} style={styles.map} initialRegion={INITIAL_REGION} showsMyLocationButton={false} showsCompass={false} toolbarEnabled={false}
         mapPadding={{ top: insets.top + 72, right: insets.right + 8, bottom: mapBottomPadding, left: insets.left + 8 }}
         onRegionChangeComplete={next => { region.current = next; setOutsideBerlin(Math.abs(next.latitude - INITIAL_REGION.latitude) > 0.04 || Math.abs(next.longitude - INITIAL_REGION.longitude) > 0.04); setAreaChanged(!searchedRegion.current || regionMoved(next, searchedRegion.current)); }}>
-        {visibleStations.map(station => <Marker key={station.id} identifier={String(station.id)} coordinate={{ latitude: station.latitude, longitude: station.longitude }} title={station.name} description={directoryCounts[station.id]?.unreserved === null ? `${directoryCounts[station.id]?.total ?? 0} listed plugs · app status unknown` : `${directoryCounts[station.id]?.unreserved ?? 0}/${directoryCounts[station.id]?.total ?? 0} unreserved in BayReady`} pinColor={selected?.id === station.id ? palette.ink : station.faultReported ? palette.errorInk : directoryCounts[station.id]?.unreserved === 0 ? '#A77A24' : directoryCounts[station.id]?.unreserved === null ? '#737D77' : '#739332'} onPress={() => { setSelected(station); setSelectedListedPlug(null); setListedPlugPage(0); setDirectoryConfirming(false); setDirectoryNotice(null); setSelectedLocationId(null); setSelectedBayId(null); setSelectedConnectorId(null); setConfirming(false); setFiltersOpen(false); }} />)}
+        {visibleStations.map(station => <Marker key={station.id} identifier={String(station.id)} coordinate={{ latitude: station.latitude, longitude: station.longitude }} title={station.name} description={directoryCounts[station.id]?.unreserved === null ? `${directoryCounts[station.id]?.total ?? 0} listed plugs · app status unknown` : `${directoryCounts[station.id]?.unreserved ?? 0}/${directoryCounts[station.id]?.total ?? 0} unreserved in BayReady`} pinColor={selected?.id === station.id ? palette.ink : station.faultReported ? palette.errorInk : directoryCounts[station.id]?.unreserved === 0 ? '#A77A24' : directoryCounts[station.id]?.unreserved === null ? '#737D77' : '#739332'} onPress={() => selectDirectoryStation(station)} />)}
         {visibleLocations.map(location => <Marker key={`location-${location.id}`} identifier={`location-${location.id}`} coordinate={{ latitude: location.latitude, longitude: location.longitude }} title={`${location.bays.every(bay => bay.mode === 'demo') ? 'DEMO · ' : ''}${location.label}`} description={`${location.unreservedBayCount} unreserved bays · ${location.connectorCount} compatible connectors`} pinColor={location.unreservedBayCount === 0 ? '#A77A24' : palette.ink} onPress={() => selectLocation(location)} />)}
         {userLocation ? <Marker key="your-location" coordinate={userLocation} title="Your location" pinColor="#356EAE" /> : null}
       </MapView>
 
       <View style={[styles.topRow, { top: insets.top + 12, left: insets.left + 16, right: insets.right + 16 }]} pointerEvents="box-none">
-        <View style={styles.brandPill}><View style={styles.brandMark}><Text style={styles.bolt}>ϟ</Text></View><View><Text style={styles.brand}>BayReady</Text><Text style={styles.brandCaption}>CHARGERS & BOOKINGS</Text></View></View>
+        <Pressable accessibilityRole="button" accessibilityLabel="Open driver profile" onPress={() => router.push('/profile')} style={styles.brandPill}><View style={styles.brandMark}><Text style={styles.bolt}>ϟ</Text></View><View><Text style={styles.brand}>BayReady</Text><Text style={styles.brandCaption}>CHARGERS & BOOKINGS</Text></View></Pressable>
         <Pressable accessibilityRole="button" accessibilityLabel="Charger filters" accessibilityState={{ expanded: filtersOpen }} onPress={() => setFiltersOpen(open => !open)} style={({ pressed }) => [styles.filterButton, filtersOpen && styles.filterButtonOpen, pressed && ui.pressed]}>
           <Text style={[styles.filterButtonText, filtersOpen && styles.filterButtonTextOpen]}>☷  Filters{activeFilterCount ? ` · ${activeFilterCount}` : ''}</Text>
         </Pressable>
@@ -449,7 +488,7 @@ export default function MapScreen() {
 
       {filtersOpen ? <View style={[styles.filterPanel, { top: insets.top + 72, right: insets.right + 16, maxHeight: filterPanelMaxHeight }]}>
         <ScrollView contentContainerStyle={styles.filterContent} showsVerticalScrollIndicator={false}>
-          <View style={styles.filterHeading}><Text style={styles.panelTitle}>Your kind of charger</Text><Pressable accessibilityRole="button" accessibilityLabel="Close filters" onPress={() => setFiltersOpen(false)} style={styles.smallClose}><Text style={styles.closeMark}>×</Text></Pressable></View>
+          <View style={styles.filterHeading}><Text style={styles.panelTitle}>Charger filters</Text><Pressable accessibilityRole="button" accessibilityLabel="Close filters" onPress={() => setFiltersOpen(false)} style={styles.smallClose}><Text style={styles.closeMark}>×</Text></Pressable></View>
           <Text style={styles.filterLabel}>Minimum power</Text>
           <View style={styles.filters}><Filter label="Any" active={minPower === undefined} onPress={() => changePower()} /><Filter label="50+ kW" active={minPower === 50} onPress={() => changePower(50)} /><Filter label="150+ kW" active={minPower === 150} onPress={() => changePower(150)} /></View>
           <View style={styles.connectorPreference}><View style={ui.flex}><Text style={styles.filterLabel}>Your connector</Text><Text style={styles.preferenceValue}>{connectorLabel(plug)}</Text></View><Link href="/profile" asChild><Pressable accessibilityRole="button" style={styles.preferenceEdit}><Text style={styles.noticeActionText}>{profile ? 'Edit profile' : 'Set up profile'}</Text></Pressable></Link></View>
@@ -457,21 +496,6 @@ export default function MapScreen() {
           <View style={styles.toggleRow}><View style={ui.flex}><Text style={styles.toggleTitle}>Show reserved</Text><Text style={styles.toggleCopy}>{directoryBookings.fresh ? `${directoryHolds.length} app plug holds${reservedBays.length ? ` · ${reservedBays.length} bay holds` : ''}` : 'Refresh to check active app bookings'}</Text></View><Switch accessibilityLabel="Show reserved BayReady stations" value={showReserved} onValueChange={setShowReserved} trackColor={{ false: palette.line, true: '#98AC68' }} thumbColor={showReserved ? palette.lime : palette.paper} /></View>
           <View style={styles.toggleRow}><View style={ui.flex}><Text style={styles.toggleTitle}>Show public chargers</Text><Text style={styles.toggleCopy}>Listed plugs · live availability unknown</Text></View><Switch accessibilityLabel="Show public chargers with listed plug counts and unknown availability" value={showDirectoryOnly} onValueChange={value => { setShowDirectoryOnly(value); if (!value) setSelected(null); }} trackColor={{ false: palette.line, true: '#98AC68' }} thumbColor={showDirectoryOnly ? palette.lime : palette.paper} /></View>
           <View style={styles.toggleRow}><View style={ui.flex}><Text style={styles.toggleTitle}>Show test location</Text><Text style={styles.toggleCopy}>Fictional inventory · app booking rehearsal</Text></View><Switch accessibilityLabel="Show the fictional test location" value={showTestLocation} onValueChange={value => { setShowTestLocation(value); if (!value && (selectedBay?.mode === 'demo' || selectedLocation?.bays.every(bay => bay.mode === 'demo'))) { setSelectedBayId(null); setSelectedLocationId(null); setSelectedConnectorId(null); setConfirming(false); } }} trackColor={{ false: palette.line, true: '#98AC68' }} thumbColor={showTestLocation ? palette.lime : palette.paper} /></View>
-          {showReserved ? <View style={styles.reservedList}><Text style={styles.filterLabel}>Reserved in BayReady</Text>{reservedBays.length === 0 ? <Text style={styles.filterFootnote}>{bookings.fresh ? 'No active reservations were returned.' : 'Refresh bookings to see active reservations.'}</Text> : reservedBays.map(bay => <View key={bay.id} style={styles.reservedRow}><Pressable accessibilityRole="button" accessibilityLabel={`View reservation at ${bay.label}`} onPress={() => { selectBay(bay); if (hasCoordinates(bay)) map.current?.animateToRegion({ latitude: bay.latitude, longitude: bay.longitude, latitudeDelta: 0.04, longitudeDelta: 0.04 }, 450); }} style={ui.flex}><Text style={styles.toggleTitle}>{bay.isMine ? 'Your hold · ' : ''}{bay.label}</Text><Text style={styles.toggleCopy}>{untilTime(bay.reservedUntil)} · {remainingTime(bay.reservedUntil, clockNow)}</Text></Pressable>{bay.isMine && bay.myReservationId ? <Pressable accessibilityRole="button" accessibilityState={{ disabled: !bookings.fresh || !!bookings.busy }} disabled={!bookings.fresh || !!bookings.busy} onPress={() => void cancelHold(bay.myReservationId!)} style={styles.rowCancel}><Text style={styles.rowCancelText}>Cancel</Text></Pressable> : null}</View>)}</View> : null}
-          <Text style={styles.filterFootnote}>App reservations are separate from physical occupancy. Public plug choices are virtual allocations.</Text>
-          {showReserved ? <View style={styles.reservedList}>
-            <Text style={styles.filterLabel}>App-only plug reservations</Text>
-            {!directoryBookings.fresh ? <Text style={styles.filterFootnote}>Previous holds are retained for reference. Refresh before cancelling.</Text> : null}
-            {directoryHolds.length === 0 ? <Text style={styles.filterFootnote}>{directoryBookings.fresh ? 'No active app plug holds were returned.' : 'App reservation status is unknown.'}</Text> : directoryHolds.map(hold => {
-              const label = listedHoldLabel(hold);
-              return <View key={`${hold.stationId}-${hold.slotKey}`} style={styles.reservedRow}>
-                <View style={ui.flex}><Text style={styles.toggleTitle}>{hold.isMine ? 'Your hold · ' : ''}{label.station}</Text><Text style={styles.toggleCopy}>{label.plug}</Text><Text style={styles.toggleCopy}>{untilTime(hold.reservedUntil)} · {remainingTime(hold.reservedUntil, directoryClockNow)}</Text></View>
-                {hold.isMine && hold.myReservationId ? <Pressable accessibilityRole="button" accessibilityLabel={`Cancel your app hold at ${label.station}`} accessibilityState={{ disabled: !directoryBookings.fresh || directoryBookings.busy }} disabled={!directoryBookings.fresh || directoryBookings.busy} onPress={() => void cancelListedHold(hold.myReservationId!)} style={styles.rowCancel}><Text style={[styles.rowCancelText, (!directoryBookings.fresh || directoryBookings.busy) && styles.disabled]}>Cancel</Text></Pressable> : null}
-              </View>;
-            })}
-            <Pressable accessibilityRole="button" disabled={directoryBookings.refreshing || directoryBookings.busy} onPress={() => void directoryBookings.refresh()} style={styles.noticeAction}><Text style={styles.noticeActionText}>{directoryBookings.refreshing ? 'Refreshing…' : 'Refresh app reservations'}</Text></Pressable>
-            {directoryBookings.error ? <Text style={styles.fault}>{directoryBookings.error}</Text> : null}
-          </View> : null}
           <Pressable accessibilityRole="button" onPress={() => setFiltersOpen(false)} style={({ pressed }) => [styles.applyButton, pressed && ui.pressed]}><Text style={styles.applyButtonText}>Show map</Text></Pressable>
         </ScrollView>
       </View> : null}
@@ -508,14 +532,14 @@ export default function MapScreen() {
           <View style={styles.detailHeading}><View style={ui.flex}><View style={styles.bayBadge}><Text style={styles.bayBadgeText}>{selectedBay.mode === 'demo' ? 'DEMO · APP BOOKING' : 'ECURIOUS · INTEGRATION PENDING'}</Text></View><Text style={styles.stationName}>{showConfirmation ? 'Confirm your demo hold' : selectedBay.label}</Text></View><Pressable accessibilityRole="button" accessibilityLabel="Close bay details" onPress={() => { setSelectedLocationId(null); setSelectedBayId(null); setSelectedConnectorId(null); setConfirming(false); }} style={styles.closeButton}><Text style={styles.closeMark}>×</Text></Pressable></View>
           {showConfirmation ? <>
             <Text style={styles.stationAddress}>{selectedBay.label} · {selectedConnector?.label} · {connectorLabel(selectedConnector?.type)} {displayPower(selectedConnector?.powerKw ?? null)}</Text>
-            {profile ? <View style={styles.confirmationSummary}><Text style={styles.confirmationText}>Vehicle {maskedVehicle(profile.licensePlate)} · {connectorLabel(profile.connectorType)}</Text><Text style={styles.confirmationText}>{profile.paymentMethod === 'mock-wallet' ? 'Mock wallet' : 'Mock card'} · no payment is taken</Text></View> : null}
+            {profile ? <View style={styles.confirmationSummary}><Text style={styles.confirmationText}>{profile.licensePlate ? 'Vehicle ' + maskedVehicle(profile.licensePlate) : 'Vehicle plate not added'} · {connectorLabel(profile.connectorType)}</Text><Text style={styles.confirmationText}>{profile.paymentMethod === 'mock-wallet' ? 'Mock wallet' : 'Mock card'} · no payment is taken</Text></View> : null}
             <View style={styles.filters}>{([5, 10, 15] as const).map(minutes => <Filter key={minutes} label={`${minutes} min`} active={holdMinutes === minutes} onPress={() => setHoldMinutes(minutes)} />)}</View>
           </> : <>
             <Text style={styles.stationAddress}>{selectedBay.mode === 'demo' && !selectedBay.goingelectricId ? 'Fictional demo location · no public charger is mapped here.' : 'Registered BayReady bay · physical vacancy is unverified.'}</Text>
             <Text style={styles.bookingStatus}>{!bookings.fresh ? 'Booking status unknown · refresh required' : selectedBay.availability === 'reserved' ? `${selectedBay.isMine ? 'Your reservation' : 'Reserved'} · ${remainingTime(selectedBay.reservedUntil, clockNow)}` : 'No active BayReady reservation'}</Text>
             {selectedBay.reservedUntil && bookings.fresh ? <Text style={styles.toggleCopy}>Until {new Date(selectedBay.reservedUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · server deadline</Text> : null}
             {heldConnector ? <Text style={styles.stationAddress}>Booked connector: {heldConnector.label} · {connectorLabel(heldConnector.type)} {displayPower(heldConnector.powerKw)}</Text> : null}
-            {selectedBayDirectory ? <Pressable accessibilityRole="link" onPress={() => void openSource(selectedBayDirectory.url)} style={styles.stationSource}><Text style={styles.stationSourceText}>GoingElectric station page ↗</Text></Pressable> : null}
+            {selectedBayDirectory ? <Pressable accessibilityRole="link" onPress={() => void openSource(selectedBayDirectory.url)} style={styles.stationSource}><Text style={styles.stationSourceText}>GoingElectric ↗</Text></Pressable> : null}
             {selectedBay.availability === 'unreserved' ? <View style={styles.connectorChoices}>
               <Text style={styles.filterLabel}>Choose an individual connector</Text>
               {bayConnectors.length === 0 ? <Text style={styles.stationAddress}>No connector matches {connectorLabel(plug)}{minPower ? ` at ${minPower}+ kW` : ''}. Edit your profile or power filter to explore other bays.</Text> : bayConnectors.map(connector => <Pressable key={connector.id} accessibilityRole="button" accessibilityState={{ selected: selectedConnectorId === connector.id, disabled: !connector.enabled || !bookings.fresh }} disabled={!connector.enabled || !bookings.fresh} onPress={() => { setSelectedConnectorId(connector.id); setConfirming(false); }} style={({ pressed }) => [styles.connectorChoice, selectedConnectorId === connector.id && styles.connectorChoiceSelected, !connector.enabled && styles.disabled, pressed && ui.pressed]}>
@@ -543,12 +567,11 @@ export default function MapScreen() {
 
       {selected && !filtersOpen ? <View onLayout={event => setDetailHeight(event.nativeEvent.layout.height)} style={[styles.details, { bottom: detailsBottom, left: insets.left + 16, right: insets.right + 16, maxHeight: detailMaxHeight }]}>
         <ScrollView style={styles.detailScroll} contentContainerStyle={styles.detailsContent} showsVerticalScrollIndicator>
-          <View style={styles.detailHeading}><View style={ui.flex}><View style={styles.bayBadge}><Text style={styles.bayBadgeText}>APP-ONLY PLUG RESERVATIONS</Text></View><Text style={styles.stationName}>{showDirectoryConfirmation ? 'Confirm your app hold' : selected.name}</Text><Text style={styles.stationAddress}>{selected.address || 'Address not listed'}</Text></View><Pressable accessibilityRole="button" accessibilityLabel="Close charger details" onPress={() => { setSelected(null); setSelectedListedPlug(null); setDirectoryConfirming(false); }} style={styles.closeButton}><Text style={styles.closeMark}>×</Text></Pressable></View>
-          <Pressable accessibilityRole="link" onPress={() => void openSource(selected.url)} style={({ pressed }) => [styles.stationSource, pressed && ui.pressed]}><Text style={styles.stationSourceText}>GoingElectric station page ↗</Text></Pressable>
+          <View style={styles.detailHeading}><View style={ui.flex}><View style={styles.bayBadge}><Text style={styles.bayBadgeText}>CHARGER</Text></View><Text style={styles.stationName}>{showDirectoryConfirmation ? 'Now, or book ahead.' : selected.name}</Text><Text style={styles.stationAddress}>{selected.address || 'Address not listed'}</Text></View><Pressable accessibilityRole="button" accessibilityLabel="Close charger details" onPress={() => { setSelected(null); setSelectedListedPlug(null); setDirectoryConfirming(false); }} style={styles.closeButton}><Text style={styles.closeMark}>×</Text></Pressable></View>
+          <Pressable accessibilityRole="link" onPress={() => void openSource(selected.url)} style={({ pressed }) => [styles.stationSource, pressed && ui.pressed]}><Text style={styles.stationSourceText}>GoingElectric ↗</Text></Pressable>
           {showDirectoryConfirmation && selectedReportedGroup && selectedListedPlug ? <>
             <Text style={styles.locationInventory}>{connectorLabel(selectedReportedGroup.type)} · app plug {selectedListedPlug.ordinal} of {selectedReportedGroup.count} · {displayPower(selectedReportedGroup.power)}</Text>
-            {profile ? <View style={styles.confirmationSummary}><Text style={styles.confirmationText}>Vehicle {maskedVehicle(profile.licensePlate)} · {connectorLabel(profile.connectorType)}</Text><Text style={styles.confirmationText}>{profile.paymentMethod === 'mock-wallet' ? 'Mock wallet' : 'Mock card'} · no payment is taken</Text></View> : null}
-            <View style={styles.filters}>{([5, 10, 15] as const).map(minutes => <Filter key={minutes} label={`${minutes} min`} active={holdMinutes === minutes} onPress={() => setHoldMinutes(minutes)} />)}</View>
+            <Text style={styles.stationAddress}>Choose Reserve now or Book ahead in the reservation window.</Text>
           </> : <>
             <View style={styles.stationMeta}><Text style={styles.power}>{displayPower(reportedMaxPower)}</Text>{selected.network ? <Text style={styles.network}>{selected.network}</Text> : null}</View>
             <Text style={styles.locationInventory}>{selectedDirectoryFresh ? `${directoryCounts[selected.id].unreserved}/${reportedPlugCount} unreserved in BayReady` : `${reportedPlugCount} listed plugs · app status unknown`}</Text>
@@ -564,7 +587,7 @@ export default function MapScreen() {
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.listedPlugs}>
                     {listedPage.ordinals.map(ordinal => {
                       const hold = holdsByStation.get(selected.id)?.find(item => item.slotKey === directorySlotKey(group, ordinal));
-                      return <Pressable key={ordinal} accessibilityRole="button" accessibilityLabel={`${connectorLabel(group.type)}, app plug ${ordinal} of ${group.count}`} accessibilityState={{ selected: selectedListedPlug?.ordinal === ordinal }} onPress={() => { setSelectedListedPlug({ stationId: selected.id, prefix: group.prefix, ordinal }); setDirectoryConfirming(false); setDirectoryNotice(null); }} style={({ pressed }) => [styles.listedPlug, selectedListedPlug?.ordinal === ordinal && styles.listedPlugSelected, pressed && ui.pressed]}><Text style={styles.listedPlugNumber}>{ordinal}</Text><Text style={styles.listedPlugType}>{connectorLabel(group.type)}</Text><Text style={styles.listedPlugCaption}>{!selectedDirectoryFresh ? 'Unknown' : hold ? hold.isMine ? 'Your hold' : 'Reserved' : 'Unreserved'}</Text></Pressable>;
+                      return <Pressable key={ordinal} accessibilityRole="button" accessibilityLabel={`${connectorLabel(group.type)}, app plug ${ordinal} of ${group.count}`} accessibilityState={{ selected: selectedListedPlug?.ordinal === ordinal }} onPress={() => { automaticPlugSelection.current = false; setSelectedListedPlug({ stationId: selected.id, prefix: group.prefix, ordinal }); setDirectoryConfirming(true); setDirectoryNotice(null); }} style={({ pressed }) => [styles.listedPlug, selectedListedPlug?.ordinal === ordinal && styles.listedPlugSelected, pressed && ui.pressed]}><Text style={styles.listedPlugNumber}>{ordinal}</Text><Text style={styles.listedPlugType}>{connectorLabel(group.type)}</Text><Text style={styles.listedPlugCaption}>{!selectedDirectoryFresh ? 'Unknown' : hold ? hold.isMine ? 'Your hold' : 'Reserved' : 'Unreserved'}</Text></Pressable>;
                     })}
                   </ScrollView>
                   {listedPage.total > 12 ? <View style={styles.listedPager}><Pressable accessibilityRole="button" disabled={effectiveListedPage === 0} onPress={() => setListedPlugPage(effectiveListedPage - 1)} style={styles.listedPageButton}><Text style={[styles.noticeActionText, effectiveListedPage === 0 && styles.disabled]}>‹ Previous</Text></Pressable><Text style={styles.toggleCopy}>{effectiveListedPage * 12 + 1}–{Math.min((effectiveListedPage + 1) * 12, listedPage.total)} of {listedPage.total}</Text><Pressable accessibilityRole="button" disabled={(effectiveListedPage + 1) * 12 >= listedPage.total} onPress={() => setListedPlugPage(effectiveListedPage + 1)} style={styles.listedPageButton}><Text style={[styles.noticeActionText, (effectiveListedPage + 1) * 12 >= listedPage.total && styles.disabled]}>Next ›</Text></Pressable></View> : null}
@@ -575,25 +598,28 @@ export default function MapScreen() {
           </>}
           {selected.faultReported ? <Text style={styles.fault}>Fault reported. New app holds are disabled for this location.</Text> : null}
           {directoryBookings.error ? <Text style={styles.fault}>{directoryBookings.error}</Text> : null}
+          {selectedOwnDirectoryBooking && selectedDirectoryFresh && directoryClockNow < Date.parse(selectedOwnDirectoryBooking.expiresAt) && ['now', 'scheduled'].includes(selectedOwnDirectoryBooking.bookingMode) && !showDirectoryConfirmation ? <View style={styles.confirmationSummary}><Text style={styles.confirmationText}>{selectedOwnDirectoryBooking.reservationFeeCents === 0 ? 'Free 10-minute app reservation' : 'App reservation · €' + (selectedOwnDirectoryBooking.reservationFeeCents / 100).toFixed(2) + ' mock'}</Text><Pressable accessibilityRole="button" disabled={!selectedDirectoryFresh || directoryBookings.busy || selected.faultReported || directoryClockNow >= Date.parse(selectedOwnDirectoryBooking.expiresAt)} onPress={() => void extendListedHold(selectedOwnDirectoryBooking.id)} style={[styles.applyButton, (!selectedDirectoryFresh || directoryBookings.busy || selected.faultReported) && styles.disabled]}><Text style={styles.applyButtonText}>Add 10 minutes · €1 mock</Text></Pressable><Text style={styles.toggleCopy}>Payments are simulated.</Text></View> : null}
           {directoryNotice ? <Text style={styles.bookingNotice} accessibilityLiveRegion="polite">{directoryNotice}</Text> : null}
-          <Text style={styles.noAvailability}>App-only allocation. Physical bay mapping, occupancy and charging are unverified.</Text>
+          <Text style={styles.noAvailability}>BayReady app slots · physical availability unknown</Text>
         </ScrollView>
         <View style={styles.bookingActions}>
           {directoryBookings.busy ? <View style={[styles.applyButton, styles.disabled]}><Text style={styles.applyButtonText}>Updating app hold…</Text></View>
             : !directoryBookings.configured ? <Text style={styles.integrationPending}>A shared booking connection is required for app holds.</Text>
             : !selectedDirectoryFresh ? <Pressable accessibilityRole="button" disabled={directoryBookings.loading || directoryBookings.refreshing} onPress={() => void directoryBookings.refresh()} style={({ pressed }) => [styles.applyButton, pressed && ui.pressed]}><Text style={styles.applyButtonText}>{directoryBookings.loading || directoryBookings.refreshing ? 'Reading app bookings…' : directoryBookings.configured ? 'Refresh app booking status' : 'Connect bookings to reserve'}</Text></Pressable>
-              : selectedDirectoryHold?.isMine && selectedDirectoryHold.myReservationId ? <Pressable accessibilityRole="button" onPress={() => void cancelListedHold(selectedDirectoryHold.myReservationId!)} style={({ pressed }) => [styles.cancelButton, pressed && ui.pressed]}><Text style={styles.cancelButtonText}>Cancel my app reservation</Text></Pressable>
-                : selectedDirectoryHold ? <Text style={styles.integrationPending}>Reserved by another BayReady user</Text>
-                  : selected.faultReported ? <Text style={styles.integrationPending}>Fault reported · app reservation unavailable</Text>
+              : selected.faultReported ? <View style={styles.connectorChoices}><Text style={styles.integrationPending}>Fault reported · app reservation unavailable</Text>{selectedDirectoryHold?.isMine && selectedDirectoryHold.myReservationId ? <Pressable accessibilityRole="button" onPress={() => void cancelListedHold(selectedDirectoryHold.myReservationId!)} style={styles.cancelButton}><Text style={styles.cancelButtonText}>Cancel my app reservation</Text></Pressable> : null}</View>
                     : !selectedSlotKey ? <View style={[styles.applyButton, styles.disabled]}><Text style={styles.applyButtonText}>Choose an app plug above</Text></View>
                       : !profile ? <Pressable accessibilityRole="button" onPress={() => router.push('/profile')} style={styles.applyButton}><Text style={styles.applyButtonText}>Set up profile to reserve</Text></Pressable>
-                        : <Pressable accessibilityRole="button" onPress={() => showDirectoryConfirmation ? void reserveListedPlug() : setDirectoryConfirming(true)} style={({ pressed }) => [styles.applyButton, pressed && ui.pressed]}><Text style={styles.applyButtonText}>{showDirectoryConfirmation ? `Confirm ${holdMinutes}-minute app hold` : 'Reserve this app plug'}</Text></Pressable>}
+                        : <View style={styles.connectorChoices}><Pressable accessibilityRole="button" onPress={() => setDirectoryConfirming(value => !value)} style={({ pressed }) => [styles.applyButton, pressed && ui.pressed]}><Text style={styles.applyButtonText}>{showDirectoryConfirmation ? '‹ Back to app plug' : selectedDirectoryHold ? 'Book this app plug ahead' : 'Reserve now or book ahead'}</Text></Pressable>{selectedDirectoryHold?.isMine && selectedDirectoryHold.myReservationId ? <Pressable accessibilityRole="button" onPress={() => void cancelListedHold(selectedDirectoryHold.myReservationId!)} style={({ pressed }) => [styles.cancelButton, pressed && ui.pressed]}><Text style={styles.cancelButtonText}>Cancel my app reservation</Text></Pressable> : selectedDirectoryHold ? <Text style={styles.integrationPending}>Reserved now by another BayReady user</Text> : null}</View>}
         </View>
       </View> : null}
 
+      {showDirectoryConfirmation && selected && selectedReportedGroup && selectedListedPlug ? <DirectoryBookingModal visible title={selected.name} plugLabel={connectorLabel(selectedReportedGroup.type) + ' · app plug ' + selectedListedPlug.ordinal + ' of ' + selectedReportedGroup.count + ' · ' + displayPower(selectedReportedGroup.power)} profile={profile} now={directoryClockNow} fresh={selectedDirectoryFresh} busy={directoryBookings.busy} nowAllowed={!selectedDirectoryHold} error={directoryBookings.error} unavailableReason={selected.faultReported ? 'A fault is reported for this location. New reservations are disabled; your existing app bookings can still be cancelled from Filters.' : undefined} onConfirm={reserveListedPlug} onClose={() => setDirectoryConfirming(false)} onChangePlug={() => { automaticPlugSelection.current = false; setDirectoryConfirming(false); }} onProfile={() => { setDirectoryConfirming(false); router.push('/profile'); }} onRefresh={() => void directoryBookings.refresh()} onSource={() => void openSource(selected.url)} /> : null}
+
+      {myBookingsOpen ? <DirectoryBookingsList visible bookings={ownDirectoryBookings} activeIds={new Set(directoryHolds.filter(hold => hold.isMine && hold.myReservationId).map(hold => hold.myReservationId!))} now={directoryClockNow} fresh={directoryBookings.fresh} busy={directoryBookings.busy} loading={directoryBookings.loading} error={directoryBookings.error} labelFor={listedHoldLabel} onClose={() => setMyBookingsOpen(false)} onRefresh={() => void directoryBookings.refresh()} onExtend={id => void extendListedHold(id)} onCancel={id => void cancelListedHold(id)} /> : null}
+
       <View style={[styles.navigation, { bottom: navigationBottom, left: insets.left + 16 }]}>
-        <Link href="/hardware" asChild><Pressable accessibilityRole="button" accessibilityLabel="Reserve now or book ahead at a hardware bay" style={({ pressed }) => [styles.navButton, styles.navPrimary, pressed && ui.pressed]}><Text style={[styles.navButtonText, styles.navPrimaryText]}>Book a bay</Text></Pressable></Link>
-        <Link href="/profile" asChild><Pressable accessibilityRole="button" style={({ pressed }) => [styles.navButton, pressed && ui.pressed]}><Text style={styles.navButtonText}>Profile</Text></Pressable></Link>
+        <Pressable accessibilityRole="button" accessibilityLabel="Reserve now or book ahead at a public app charger" onPress={startPublicReservation} style={({ pressed }) => [styles.navButton, styles.navPrimary, pressed && ui.pressed]}><Text style={[styles.navButtonText, styles.navPrimaryText]}>Reserve</Text></Pressable>
+        <Pressable accessibilityRole="button" onPress={() => { setFiltersOpen(false); setMyBookingsOpen(true); }} style={({ pressed }) => [styles.navButton, pressed && ui.pressed]}><Text style={styles.navButtonText}>Bookings{ownDirectoryBookings.length ? ' · ' + ownDirectoryBookings.length : ''}</Text></Pressable>
       </View>
       <Pressable accessibilityRole="button" accessibilityLabel="Center map on my location" accessibilityState={{ disabled: locating, busy: locating }} disabled={locating} onPress={() => void locate()} style={({ pressed }) => [styles.locationButton, { bottom: navigationBottom, right: insets.right + 16 }, locating && styles.disabled, pressed && ui.pressed]}>
         {locating ? <ActivityIndicator color={palette.ink} size="small" /> : <Text style={styles.locationMark}>◎</Text>}

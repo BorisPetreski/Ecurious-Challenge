@@ -80,6 +80,23 @@ All three error lists were present and empty at that snapshot; `faultsKnown` dis
 
 A five-second SSE observation at `11:28:30.130Z` used header authentication and returned HTTP 200 with 86 bytes: only `connected`, containing `status` and `timestamp`. No plate, occupancy, movement or alarm event was observed. The reference/dashboard event-name discrepancy remains unresolved. No raw plate, image, credential, or upstream response body was printed or saved by these probes.
 
+### Built-in OCR and whitelist recheck — 24 October 2026, 13:27 UTC
+
+The service's public reference and bounded authenticated list/latest-recognition GETs were checked again at `2026-10-24T13:27:55.944Z`. The root reference and assigned-lock list returned HTTP 200. This list contained **two** assigned locks, `lock-0002` and `lock-0003`; `lock-0001` was absent. Current assignment must be checked before using an older mapping or allowlist.
+
+| Assigned lock | Last reported state and provider sample time | Latest OCR read |
+| --- | --- | --- |
+| `lock-0002` | `lowered` / string `vacant`; `lastSeenAt: 13:26:33.367Z`; wildcard access; empty error list | HTTP 200; keys exactly `lockId`, `timestamp`, `licensePlate`, `plateType`; matching lock ID and a nonempty plate string; timestamp `12:25:28.267Z`, about 62 minutes old. No confidence or event-ID field. |
+| `lock-0003` | `lowered` / string `vacant`; `lastSeenAt: 13:27:37.159Z`; wildcard access; empty error list | HTTP 404: no latest recognition was available. |
+
+These are reported snapshots. The first lock's telemetry was older than the 60-second diagnostic rule; both samples were older than the default five-second movement preflight rule. Wildcard access also fails the current protection preflight. The historical OCR and the 404 do not establish arrival, vacancy, departure or a no-show. No raw plate or camera capture was printed or retained by these reads, and no policy/movement POST was sent.
+
+The current reference explicitly describes `GET /api/v1/locks/:id/plate/latest` as the most recent result from the **onboard OCR camera**. Its documented response is `{lockId, timestamp, licensePlate, plateType}`. Neither the reference nor the observed successful response supplies a confidence score; the application must not invent one. The existing private `getPlateMatch` adapter can consume this first-party result without a YOLO model, enforcing the lock ID, timestamp boundary and private plate comparison before durable entry authorization. A result must be newer than the relevant booking/protection observation, within the accepted freshness/deadline policy, and durably deduplicated. Accepted recognition still differs from sensor-confirmed parking.
+
+The whitelist POST has a different physical effect. `POST /api/v1/locks/:id/whitelist` programs up to ten entries into the camera's EEPROM; a matching approach automatically lowers the arm. The documented bodies are `{ "plates": ["[FICTIONAL-PLATE]"] }`, `{ "wildcard": true }`, and `{ "plates": [] }` to disable auto-unlock. The response example has `success`, `message` and an echoed `whitelist`. It is configuration acknowledgement, not an injected OCR event, EEPROM readback proof, or confirmed barrier position. Persistent rules still have no documented booking TTL or per-plate expiry.
+
+No OCR-injection or test/simulation endpoint was documented in the current REST/MCP reference or participant dashboard. This does not establish that an undocumented organiser tool cannot exist. A mocked whitelist response can test application parsing; a real whitelist request changes physical access and requires the reviewed policy lifecycle. The current guarded movement path expects automatic plate access disabled. Using onboard OCR with that path first needs confirmation that recognition continues while auto-unlock is disabled. Choosing hardware whitelist auto-entry instead requires durable policy-write acknowledgement/uncertainty handling, fresh entry observations, expiry/cleanup and protection against old rules remaining effective; simply sending a whitelist POST would bypass those assumptions. Both physical paths still need a supervised full-cycle test on the assigned hardware.
+
 ## Later read-only assignment checkpoint
 
 At `2026-10-24T10:54:04.599Z`, the redacted CLI list read returned team `E-Indifferent` with three assigned locks. This supersedes the initial one-lock assignment snapshot; it is not evidence of current physical mapping or an authorized movement test.
@@ -240,7 +257,7 @@ These are contract gaps, not proof that every capability is absent from the wide
 
 ## Prerequisites for the first real full cycle
 
-1. Recheck `lock-0001` and have the mentor confirm its connection and the earlier lowering-stall condition. Later raised status superseded the initial offline report, but no motor movement or fault recovery was directly observed. Confirm which telemetry proves hardware connectivity.
+1. Recheck the user-selected `lock-0002` and current assignment. The earlier `lock-0001` fault snapshots are historical; that device was absent from the latest assignment. The user has confirmed the mentor's interlock/auto-relift checks for the barrier-only test. Record a supervised command cycle separately and confirm which fresh telemetry establishes movement/connectivity.
 2. Identify the exact assigned test bay, physical layout, sensor behavior, and any accepted GoingElectric/charger mapping. Do not operate unrelated infrastructure.
 3. Confirm occupancy interlocks and safe lock/unlock sequencing, including relift and keep-state behavior. Unknown or stale occupancy must not enable a movement based on a claimed empty bay.
 4. Establish how a booking installs and removes a specific plate rule, how expiry/cancellation restores the agreed configuration, and which actual recognition event proves arrival. Verify the SSE name mismatch with real observations.

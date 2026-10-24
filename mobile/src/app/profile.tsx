@@ -42,6 +42,7 @@ export default function ProfileScreen() {
   const [saving, setSaving] = useState(false);
   const initialized = useRef(false);
   const edited = useRef(false);
+  const hadProfile = useRef(false);
   const editing = profile !== null;
   const disabled = loading || saving;
 
@@ -49,6 +50,18 @@ export default function ProfileScreen() {
     if (router.canGoBack()) router.back();
     else router.replace('/');
   }
+
+  useEffect(() => {
+    if (!loading && !profile && hadProfile.current) {
+      // A local deletion from the privacy screen must also clear this retained
+      // screen's draft when the driver returns through the navigation stack.
+      setDraft(EMPTY_PROFILE);
+      setErrors({});
+      edited.current = false;
+      initialized.current = true;
+    }
+    hadProfile.current = profile !== null;
+  }, [loading, profile]);
 
   useEffect(() => {
     if (loading || error || initialized.current) return;
@@ -104,22 +117,23 @@ export default function ProfileScreen() {
             <View style={styles.intro}>
               <Text style={ui.eyebrow}>{editing ? 'YOUR DRIVER PROFILE' : 'READY FOR YOUR NEXT STOP'}</Text>
               <Text accessibilityRole="header" style={styles.heading}>{editing ? 'Your car.\nYour preferences.' : 'Set up once.\nFind your space.'}</Text>
-              <Text style={styles.introText}>Save your details on this phone so your connector and reservation summary are ready next time.</Text>
+              <Text style={styles.introText}>Save your connector on this phone. Contact details are optional; a plate is needed only for hardware bookings.</Text>
             </View>
 
             {loading ? <View style={styles.notice}><ActivityIndicator color={palette.ink} /><Text style={styles.noticeText}>Loading your saved profile…</Text></View> : null}
             {error ? <View style={styles.errorNotice} accessibilityLiveRegion="polite"><Text style={styles.noticeTitle}>Profile storage needs attention</Text><Text style={styles.noticeText}>{error}</Text><ActionButton label="Retry profile storage" variant="secondary" disabled={disabled} onPress={() => void reload()} /></View> : null}
 
             <View style={styles.card}>
-              <View style={styles.sectionTitleRow}><Text style={styles.step}>01</Text><View><Text style={styles.sectionTitle}>Your contact details</Text><Text style={styles.sectionCopy}>For your saved profile.</Text></View></View>
-              <ProfileField label="Name" value={draft.name} onChangeText={value => update('name', value)} placeholder="Your name" autoComplete="name" textContentType="name" autoCapitalize="words" maxLength={100} editable={!disabled} error={errors.name} />
-              <ProfileField label="Email" value={draft.email} onChangeText={value => update('email', value)} placeholder="you@example.com" keyboardType="email-address" autoComplete="email" textContentType="emailAddress" autoCapitalize="none" autoCorrect={false} maxLength={254} editable={!disabled} error={errors.email} />
-              <ProfileField label="Phone with country code" value={draft.phone} onChangeText={value => update('phone', value)} placeholder="+49 151 23456789" keyboardType="phone-pad" autoComplete="tel" textContentType="telephoneNumber" maxLength={30} editable={!disabled} error={errors.phone} />
+              <View style={styles.sectionTitleRow}><Text style={styles.step}>01</Text><View><Text style={styles.sectionTitle}>Optional contact details</Text><Text style={styles.sectionCopy}>Only on this device. Leave blank if unused.</Text></View></View>
+              <ProfileField label="Name (optional)" value={draft.name} onChangeText={value => update('name', value)} placeholder="Your name" autoComplete="name" textContentType="name" autoCapitalize="words" maxLength={100} editable={!disabled} error={errors.name} />
+              <ProfileField label="Email (optional)" value={draft.email} onChangeText={value => update('email', value)} placeholder="you@example.com" keyboardType="email-address" autoComplete="email" textContentType="emailAddress" autoCapitalize="none" autoCorrect={false} maxLength={254} editable={!disabled} error={errors.email} />
+              <ProfileField label="Phone with country code (optional)" value={draft.phone} onChangeText={value => update('phone', value)} placeholder="+49 151 23456789" keyboardType="phone-pad" autoComplete="tel" textContentType="telephoneNumber" maxLength={30} editable={!disabled} error={errors.phone} />
             </View>
 
             <View style={styles.card}>
               <View style={styles.sectionTitleRow}><Text style={styles.step}>02</Text><View><Text style={styles.sectionTitle}>Your car</Text><Text style={styles.sectionCopy}>Your connector filters the map.</Text></View></View>
-              <ProfileField label="License plate" value={draft.licensePlate} onChangeText={value => update('licensePlate', value)} placeholder="Your vehicle’s plate" autoCapitalize="characters" autoCorrect={false} maxLength={20} editable={!disabled} error={errors.licensePlate} />
+              <ProfileField label="License plate (hardware bookings only)" value={draft.licensePlate} onChangeText={value => update('licensePlate', value)} placeholder="Optional for map reservations" autoCapitalize="characters" autoCorrect={false} maxLength={20} editable={!disabled} error={errors.licensePlate} />
+              <Text style={styles.help}>Only hardware bookings need a plate for vehicle matching. Leave it blank for public map software holds.</Text>
               <Text style={styles.label}>Connector type</Text>
               <View style={styles.choices}>
                 {CONNECTOR_OPTIONS.map(option => <Pressable key={option.value} accessibilityRole="radio" accessibilityState={{ checked: draft.connectorType === option.value, disabled }} onPress={() => update('connectorType', option.value)} disabled={disabled} style={({ pressed }) => [styles.choice, draft.connectorType === option.value && styles.choiceSelected, pressed && ui.pressed]}><Text style={[styles.choiceText, draft.connectorType === option.value && styles.choiceTextSelected]}>{option.label}</Text></Pressable>)}
@@ -138,7 +152,10 @@ export default function ProfileScreen() {
             </View>
 
             <View style={styles.privacy}><Text style={styles.privacyTitle}>Saved on this device</Text><Text style={styles.help}>Your profile stays in this phone’s secure storage. Only a hardware time-slot booking sends its vehicle plate to the backend for camera matching; the backend stores a keyed fingerprint rather than the raw plate. Contact details and mock payment preferences stay local. If you choose email sign-in, that account email goes to Supabase Auth. The charging directory receives no profile details. This local profile is separate from your booking sign-in.</Text></View>
-            <Link href="/sign-in" asChild><Pressable accessibilityRole="button" style={[ui.button, ui.secondaryButton]}><Text style={ui.buttonText}>Sign in & account</Text></Pressable></Link>
+            <Link href="/sign-in" asChild><Pressable accessibilityRole="button" style={StyleSheet.flatten([ui.button, ui.secondaryButton])}><Text style={ui.buttonText}>Sign in & account</Text></Pressable></Link>
+            {setupSeen || editing ? <Link href="/hardware" asChild><Pressable accessibilityRole="button" style={StyleSheet.flatten([ui.button, ui.secondaryButton])}><Text style={ui.buttonText}>Hardware test</Text></Pressable></Link> : null}
+            <Link href="/privacy" asChild><Pressable accessibilityRole="button" style={StyleSheet.flatten([ui.button, ui.secondaryButton])}><Text style={ui.buttonText}>Privacy & your data</Text></Pressable></Link>
+            <Link href="/simulation" asChild><Pressable accessibilityRole="button" style={StyleSheet.flatten([ui.button, ui.secondaryButton])}><Text style={ui.buttonText}>Multi-car Scenario lab</Text></Pressable></Link>
             {Object.keys(errors).some(key => errors[key as keyof ProfileFieldErrors]) ? <Text accessibilityLiveRegion="polite" style={styles.fieldError}>Check the highlighted fields, then save again.</Text> : null}
             <ActionButton label={saving ? 'Saving…' : editing ? 'Save changes' : 'Save & continue'} onPress={() => void save()} disabled={disabled} loading={saving} variant="dark" />
             {!editing ? <Pressable accessibilityRole="button" disabled={disabled} onPress={() => void explore()} style={({ pressed }) => [styles.skipButton, pressed && ui.pressed, disabled && styles.disabled]}><Text style={styles.skipText}>Explore map first</Text><Text style={styles.skipCopy}>You can add your profile before reserving.</Text></Pressable> : null}

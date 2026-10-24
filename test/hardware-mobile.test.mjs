@@ -195,3 +195,16 @@ test('hardware snapshots reject ownership, capability, identity, target and time
   ];
   for (const change of invalid) { const value = snapshot(); change(value); assert.equal(validate(value), false); }
 });
+
+test('hardware snapshots accept a zero-power barrier test without accepting a fictitious charging rating', async t => {
+  const f = await clientFixture(); t.after(f.cleanup); const validate = f.client.isHardwareWorkflowSnapshot;
+  const value = snapshot();
+  Object.assign(value.workflows[0].bay.connectors[0], { label: 'Barrier-only test · no charging', type: 'BARRIER_TEST', powerKw: 0 });
+  assert.equal(validate(value), true);
+  value.workflows[0].bay.connectors[0].powerKw = 22;
+  assert.equal(validate(value), false);
+  value.workflows[0].bay.connectors[0].type = 'CCS';
+  assert.equal(validate(value), true);
+  value.workflows[0].bay.connectors[0].powerKw = 0;
+  assert.equal(validate(value), false);
+});

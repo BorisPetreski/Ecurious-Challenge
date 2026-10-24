@@ -30,28 +30,38 @@ The mobile app uses Expo SDK 58, React Native, Expo Router, and TypeScript. It c
 - First-launch local driver profile, saved connector preference, and mock payment selection.
 - Location → bay → individual connector selection, with a reservation holding the whole bay.
 - Individually selectable directory app slots: an unreserved listed plug can receive a shared software hold that blocks the same slot for other BayReady users.
-- Supabase booking integration prepared for registered bays, shared holds, expiry and owner-only cancellation; hosted migration/auth setup pending.
+- Separate **Bookings** view for active/upcoming holds; compact **Reserve now** and **Schedule** choices, native date/time selection and one confirmation action.
+- Scheduled arrival holds from ten minutes before arrival until ten minutes after it; a timely trusted plate match stops unused-hold expiry on enrolled hardware. Ten-minute extensions cost €1 mock.
+- Hosted Supabase booking schema, persistent guest/email sign-in, shared holds and owner-only cancellation.
 - Native reservation screen and activity timeline backed by the local simulator.
 - Separate read-only Ecurious diagnostics and a designated-bay protect/entry/release screen.
-- Guarded durable hardware commands with worker claims, sensor confirmation, blocked-state recovery and no-show cleanup intents; activation remains pending.
+- Guarded durable hardware commands with worker claims, sensor confirmation, blocked-state recovery and no-show cleanup intents; a barrier-only `lock-0002` is enrolled for the app test.
 - Fictional station cards with one reservable demo bay.
 - Reserve, simulated plate check, simulated charging, departure, and release.
 - No-show expiry, blocked-bay scenarios, low-confidence recognition, and capability-driven controls.
 - Typed API client with bounded requests and polling while the app is active.
+- Multi-car **Scenario lab** with three fictional drivers, seven guided cases, a virtual clock and explicit command/sensor steps. Open it from Profile, Activity or the disconnected Hardware screen.
+- **Profile → Privacy & data** for an explicit local export/deletion, owner-only cloud booking export and a pending-review erasure request. Contact fields are optional. Ecurious is the intended operator; legal notice, retention and fulfillment still need operator completion.
 
-The Node lifecycle rehearsal remains simulated. A separate guarded Ecurious workflow is implemented for explicitly enrolled test bays, with commands **off by default**. It needs the fourth migration, a backend-only Supabase server key, operator enrollment/interlock confirmation and an assigned-lock allowlist before activation. No physical movement or complete live cycle has been verified. See [hardware setup](docs/HARDWARE-SETUP.md) and [blocked-bay/no-show behavior](docs/BAY-LIFECYCLE.md).
+The Node lifecycle rehearsal remains simulated. The separate Ecurious workflow has an enrolled **barrier-only `lock-0002` test interface, 0 kW, no charger**. The user relayed the operator confirmations and exclusive team use. A direct raise/lower API test received acknowledgements and newer matching hardware reports; an additional worker cleanup lowering was confirmed. After a telemetry pause, a genuine fresh vacant/lowered report at **14:22:21.966 UTC** reconciled the bay and restored activation. Device reports have been about three minutes apart; a booking intent and confirmed physical protection are separate states. The complete customer plate/occupancy/departure cycle remains unverified. See the [app walkthrough](docs/LOCK-0002-WALKTHROUGH.md), [hardware setup](docs/HARDWARE-SETUP.md) and [blocked-bay/no-show behavior](docs/BAY-LIFECYCLE.md).
 
 Activity diagnostics use real Ecurious reads. Stale/offline readings remain unknown. The dedicated hardware screen separates booking state, command acknowledgement and physical observations; unknown delivery stays quarantined. The native map still retrieves GoingElectric directly with source/time/entry links. Directory app slots do not automatically map to Ecurious hardware.
 
-Put the registered GoingElectric app key in the root `.env` as `ELECTRIC_API_KEY` (also accepts `GOINGELECTRIC_API_KEY`). Root launchers pass this directory key to the phone for direct requests. It stays out of tracked source; it is available on the end device. Restart Expo after key changes. The opening map fills the screen; use **Filters** for connector/power, reported faults, reserved bays/deadlines, and directory-only chargers. The location control sits at the lower right. The initial view is Berlin, not a detected location. Required basemap branding remains visible; no website is embedded.
+Put the registered GoingElectric app key in the root `.env` as `ELECTRIC_API_KEY` (also accepts `GOINGELECTRIC_API_KEY`). Root launchers pass this directory key to the phone for direct requests. It stays out of tracked source; it is available on the end device. Restart Expo after key changes. The opening map fills the screen; use **Filters** for connector/power, reported faults, reserved visibility and directory-only chargers. **Bookings** shows your active/upcoming holds and their deadlines. The location control sits at the lower right. The initial view is Berlin, not a detected location. Required basemap branding remains visible; no website is embedded.
 
-First launch offers profile setup with name, email, phone, plate, connector and a mock payment preference. It is saved on the device; **Explore map first** permits browsing without personal details. Your saved connector automatically filters the map, while minimum power stays in the dropdown. Edit the profile from the map's **Profile** control.
+First launch offers profile setup with name, email, phone, plate, connector and a mock payment preference. Profile also links to optional email sign-in and guest account conversion. It is saved on the device; **Explore map first** permits browsing without personal details. Your saved connector automatically filters the map, while minimum power stays in the dropdown. Edit the profile from the map's **Profile** control.
 
 The map shows real GoingElectric locations and their listed plugs by default. After a fresh database read, plugs without active BayReady holds start unreserved in the app. Choose a plug, review the masked vehicle/mock payment and duration, then confirm a shared hold. Other BayReady users cannot reserve the same app slot until cancellation or server expiry. Physical occupancy and operator availability remain unverified. Directory counts define virtual app slots, not assigned physical bay IDs.
 
-Separately, registered bays are grouped by location; choosing one of their connectors holds the whole physical bay in the app inventory. Shared booking code and four schema migrations are prepared for the supplied Supabase project; hosted activation still needs administrator access. Follow [the setup and reservation model](docs/SUPABASE.md). Fictional test inventory is optional in Filters; the independent local simulator remains at `/reserve`.
+Separately, registered bays are grouped by location; choosing one of their connectors holds the whole physical bay in the app inventory. The supplied Supabase project has the shared booking schema and sign-in configured; migration evidence is tracked in the build log. Follow [the setup and reservation model](docs/SUPABASE.md). Fictional test inventory is optional in Filters; the independent local simulator remains at `/reserve`.
 
 Set `ECURIOUS_API_KEY` in the root `.env` and restart `npm start` to enable hardware diagnostics. The supplied challenge service is the default origin; `ECURIOUS_BASE_URL` can override it with an HTTPS origin. The key stays on the backend and is removed from the Expo child process environment. Run `npm run hardware:inspect` for the same redacted, read-only report in the terminal. See the [verified Ecurious API contract and observations](docs/ECURIOUS-API.md).
+
+## Reservation options and session
+
+Public map plugs and enrolled hardware bays offer **Reserve now — 10 minutes free**, **Add 10 minutes — €1 mock**, and **Book ahead** with native calendar/time dialogs. Scheduled bookings currently use a €1 mock fee. Hardware protection is requested ten minutes before arrival; an occupied requested bay can switch to a compatible bay at the same location. A full location records a mock refund and suggests nearby confirmed alternatives. Public directory choices remain software holds and do not control public barriers.
+
+Open **Profile → Sign in & account** for email/password sign-in or to keep guest bookings while verifying an email. **Hardware → View session** shows duration, vehicle, connector, booking and available hardware facts; live energy and power require charger telemetry. Native Ecurious latest OCR is the primary recognition source; no YOLO model is required. Whitelist programming is a separate device auto-access mode. See [the booking/session design](docs/SCHEDULED-SESSIONS.md) and [native OCR rehearsal](docs/NATIVE-OCR-TEST.md).
 
 ## Useful commands
 
@@ -64,10 +74,13 @@ Set `ECURIOUS_API_KEY` in the root `.env` and restart `npm start` to enable hard
 | `npm run dev` | Watch and restart the standalone backend |
 | `npm test` | Lifecycle, HTTP, directory slot, profile and booking contract checks |
 | `npm run test:database` | Isolated Postgres migration, permission, expiry and concurrency checks using Docker |
+| `npm run test:database -- --multi-car-only` | Two concurrent owners, car matching, whole-bay exclusion and fallback in isolated Postgres |
+| `npm run test:database -- --privacy-only` | Owner-only data export and erasure intake; no Auth/hardware changes |
 | `npm run check` | JavaScript syntax and native TypeScript checks |
 | `npm run mobile:doctor` | Expo project checks |
 | `npm run doctor` | Backend setup and available-port check |
 | `npm run hardware:inspect` | Read assigned Ecurious locks without sending commands or printing plates |
+| `npm run hardware:enroll-test -- --lock-id lock-0002` | Preview the explicit barrier-only test enrollment; `--apply` registers it with control gates disabled |
 
 The standalone browser demo is available at http://127.0.0.1:3000 while the API runs. Optional backend settings go in `.env`, copied from `.env.example`. Mobile address overrides go in `mobile/.env`, copied from `mobile/.env.example`. Both actual environment files are ignored by Git. Never place hardware secrets in an `EXPO_PUBLIC_` variable; those values are bundled into the app.
 
@@ -97,12 +110,15 @@ The standalone browser demo is available at http://127.0.0.1:3000 while the API 
 - [Demo and pitch rehearsal](docs/PITCH.md).
 - [Business model: pricing, no-shows, blocked bays and unit economics](docs/BUSINESS-MODEL.md), with [editable assumptions](docs/business-model/assumptions.json) and [scenario results](docs/business-model/scenarios.csv).
 - [Build log and evidence checklist](docs/BUILD-LOG.md).
+- [All 20 guiding questions with concrete implementation suggestions](docs/CHALLENGE-WORKFLOW.md).
+- [Multi-car lab and real database verification](docs/MULTI-CAR-SIMULATION.md), [plate-model handoff](docs/MODEL-INTEGRATION.md) and [privacy implementation/readiness](docs/PRIVACY.md).
+- [Live lock-0002 app test walkthrough](docs/LOCK-0002-WALKTHROUGH.md), including plate, occupancy and release steps for the barrier-only hardware.
 - [Original challenge brief](source/challenge-brief.pdf) and [extracted text](source/challenge-brief.txt).
 
 The repository is [BorisPetreski/Ecurious-Challenge](https://github.com/BorisPetreski/Ecurious-Challenge). The user manages Git; no push is performed by the setup scripts. Keep `.env`, private runtime data, real plates, and camera captures out of commits. The scripts do not create cloud builds, publish an app, or configure a production backend.
 
 ## Integration priorities
 
-The latest read-only check authenticated team `E-Indifferent` with three assigned locks. At `2026-10-24T10:54:04.599Z`, `lock-0001` was offline, `lock-0002` had a recent raised/vacant report, and `lock-0003` was stale. All reported wildcard camera access. These are dated observations, not current-state guarantees or confirmed physical bay mappings. Ask the Ecurious mentors to confirm current connectivity, occupancy interlocks, relift behavior, specific-plate access, actual event delivery, and accepted charging evidence before enabling movement. Connect one full real reservation cycle before adding extra features. A polished app is optional in the brief; a working hardware integration is required for top ranks.
+The selected **lock-0002** is enrolled as barrier-only hardware. Direct API movement was confirmed by newer provider reports at `2026-10-24T13:54:55.309Z` (raised) and `13:54:59.709Z` (lowered). After the user confirmed exclusive team use, automatic camera access was disabled and verified in four reads. These are dated observations, not a current-state guarantee. The app's native OCR → private plate match → entry → occupancy → departure cycle still needs an actual camera/sensor run; accepted charging evidence needs organiser agreement because this rig has no charger. A polished app is optional in the brief; the core hardware cycle matters most.
 
 Source references: [GoingElectric API documentation](https://www.goingelectric.de/stromtankstellen/api/docs/), [GoingElectric API terms](https://www.goingelectric.de/stromtankstellen/api/terms/), and [Expo documentation](https://docs.expo.dev/). Product defaults and hypothetical pricing remain proposals for the team.

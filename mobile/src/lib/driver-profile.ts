@@ -44,17 +44,17 @@ export function validateProfileInput(input: unknown): ProfileValidation {
   const licensePlate = rawPlate.toUpperCase().replace(/ +/g, ' ');
   const plateCharacters = Array.from(licensePlate.replace(/[ -]/g, '')).length;
 
-  if (Array.from(name).length < 1 || Array.from(name).length > 100 || /\p{C}/u.test(name)) {
-    errors.name = 'Enter a name between 1 and 100 printable characters.';
+  if ((fields.name !== undefined && typeof fields.name !== 'string') || Array.from(name).length > 100 || /\p{C}/u.test(name)) {
+    errors.name = 'Leave blank or enter up to 100 printable characters.';
   }
-  if (Array.from(email).length > 254 || /\p{C}/u.test(email) || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email)) {
-    errors.email = 'Enter a valid email address, for example driver@example.com.';
+  if ((fields.email !== undefined && typeof fields.email !== 'string') || (email !== '' && (Array.from(email).length > 254 || /\p{C}/u.test(email) || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email)))) {
+    errors.email = 'Leave blank or enter a valid email address, for example driver@example.com.';
   }
-  if (!/^\+[1-9]\d{6,14}$/.test(phone) || !/^\+[\d ().-]+$/.test(rawPhone)) {
-    errors.phone = 'Include the country code, for example +49 151 23456789 (7–15 digits).';
+  if ((fields.phone !== undefined && typeof fields.phone !== 'string') || (rawPhone !== '' && (!/^\+[1-9]\d{6,14}$/.test(phone) || !/^\+[\d ().-]+$/.test(rawPhone)))) {
+    errors.phone = 'Leave blank or include a country code, for example +49 151 23456789 (7–15 digits).';
   }
-  if (!/^[\p{L}\p{N} -]+$/u.test(licensePlate) || Array.from(licensePlate).length > 20 || plateCharacters < 2 || plateCharacters > 15) {
-    errors.licensePlate = 'Use 2–15 letters or numbers, with optional spaces or hyphens (20 characters maximum).';
+  if ((fields.licensePlate !== undefined && typeof fields.licensePlate !== 'string') || (licensePlate !== '' && (!/^[\p{L}\p{N} -]+$/u.test(licensePlate) || Array.from(licensePlate).length > 20 || plateCharacters < 2 || plateCharacters > 15))) {
+    errors.licensePlate = 'Leave blank, or use 2–15 letters or numbers with optional spaces or hyphens (20 characters maximum).';
   }
   if (!CONNECTOR_OPTIONS.some(option => option.value === fields.connectorType)) {
     errors.connectorType = 'Choose the connector your car uses.';

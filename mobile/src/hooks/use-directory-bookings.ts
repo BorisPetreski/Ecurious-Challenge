@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 
-import { BOOKINGS_CONFIGURED, BookingApiError, cancelDirectoryHold, fetchDirectoryHolds, reserveDirectoryPlug } from '@/lib/bookings-api';
+import {
+  BOOKINGS_CONFIGURED, BookingApiError, cancelDirectoryHold, extendDirectoryBooking, fetchDirectoryHolds,
+  reserveDirectoryBooking, reserveDirectoryPlug,
+} from '@/lib/bookings-api';
 import {
   canonicalDirectoryStationIds, isDirectorySlotKey,
-  type DirectoryHoldSnapshot, type DirectoryReservation, type HoldMinutes,
+  type DirectoryBooking, type DirectoryBookingOptions, type DirectoryHoldSnapshot, type DirectoryReservation, type HoldMinutes,
 } from '@/lib/directory-booking-contract';
 
 export interface UseDirectoryBookingsResult {
@@ -20,6 +23,8 @@ export interface UseDirectoryBookingsResult {
   fresh: boolean;
   refresh: () => Promise<void>;
   reserve: (stationId: number, slotKey: string, minutes: HoldMinutes) => Promise<DirectoryReservation | null>;
+  reserveBooking: (stationId: number, slotKey: string, options: DirectoryBookingOptions) => Promise<DirectoryBooking | null>;
+  extend: (reservationId: string) => Promise<DirectoryBooking | null>;
   cancel: (reservationId: string) => Promise<boolean>;
 }
 
@@ -74,7 +79,8 @@ export function useDirectoryBookings(stationIds: readonly number[]): UseDirector
     observationRef.current = next;
     setObservation(next);
     markFresh(appState.current === 'active');
-    setReservation(previous => previous && snapshot.holds.some(hold => hold.myReservationId === previous.id) ? previous : null);
+    setReservation(previous => previous && (snapshot.holds.some(hold => hold.myReservationId === previous.id) ||
+      snapshot.myBookings?.some(booking => booking.id === previous.id)) ? previous : null);
     return true;
   }, [markFresh]);
 
@@ -132,7 +138,7 @@ export function useDirectoryBookings(stationIds: readonly number[]): UseDirector
     await operation.promise;
   }, [accept, markFresh]);
 
-  const mutate = useCallback(async (request: () => Promise<DirectoryReservation>): Promise<DirectoryReservation | null> => {
+  const mutate = useCallback(async <T extends DirectoryReservation>(request: () => Promise<T>): Promise<T | null> => {
     if (!BOOKINGS_CONFIGURED || !mounted.current || appState.current !== 'active') return null;
     const observed = observationRef.current;
     if (!observed || !freshRef.current || observed.scopeKey !== scopeRef.current?.key || Date.now() - observed.at > MAX_OBSERVATION_AGE_MS) {
@@ -156,8 +162,8 @@ export function useDirectoryBookings(stationIds: readonly number[]): UseDirector
     setError(null);
     markFresh(false);
 
-    const mutation = (async (): Promise<DirectoryReservation | null> => {
-      let result: DirectoryReservation | null = null;
+    const mutation = (async (): Promise<T | null> => {
+      let result: T | null = null;
       let mutationError: string | null = null;
       try {
         try {
@@ -209,8 +215,25 @@ export function useDirectoryBookings(stationIds: readonly number[]): UseDirector
     }
     return mutate(() => reserveDirectoryPlug(stationId, slotKey, minutes));
   }, [mutate]);
+  const reserveBooking = useCallback((stationId: number, slotKey: string, options: DirectoryBookingOptions) => {
+    if (!scopeRef.current?.ids.includes(stationId) || !isDirectorySlotKey(slotKey)) {
+      setError('Select a listed plug in the currently loaded directory area.');
+      return Promise.resolve(null);
+    }
+    return mutate(() => reserveDirectoryBooking(stationId, slotKey, options));
+  }, [mutate]);
+  const extend = useCallback((id: string) => {
+    const snapshot = observationRef.current?.snapshot;
+    if (!snapshot?.myBookings?.some(booking => booking.id === id) &&
+      !snapshot?.holds.some(hold => hold.isMine && hold.myReservationId === id)) {
+      setError('Refresh app reservations to restore your booking before extending.');
+      return Promise.resolve(null);
+    }
+    return mutate(() => extendDirectoryBooking(id));
+  }, [mutate]);
   const cancel = useCallback(async (id: string) => {
-    if (!observationRef.current?.snapshot.holds.some(hold => hold.isMine && hold.myReservationId === id)) {
+    const snapshot = observationRef.current?.snapshot;
+    if (!snapshot?.holds.some(hold => hold.isMine && hold.myReservationId === id) && !snapshot?.myBookings?.some(booking => booking.id === id)) {
       setError('Refresh app reservations to restore your active hold before cancelling.');
       return false;
     }
@@ -255,6 +278,6 @@ export function useDirectoryBookings(stationIds: readonly number[]): UseDirector
   return {
     configured: BOOKINGS_CONFIGURED, loading, refreshing, busy, error,
     snapshot: observation?.snapshot ?? null, reservation,
-    queriedStationIds: observation?.ids ?? [], fresh, refresh, reserve, cancel,
+    queriedStationIds: observation?.ids ?? [], fresh, refresh, reserve, reserveBooking, extend, cancel,
   };
 }

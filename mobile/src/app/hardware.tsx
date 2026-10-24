@@ -16,15 +16,15 @@ import type { HardwareLock } from '@/lib/hardware-api';
 import type { HardwarePhase, HardwareWorkflow } from '@/lib/hardware-workflow-api';
 
 const phaseLabels: Record<HardwarePhase, string> = {
-  idle: 'No active hardware reservation',
-  protect_pending: 'Protection requested · waiting to dispatch',
-  protecting: 'Awaiting protection observation',
-  protected: 'Protection confirmed by the backend',
-  entry_pending: 'Entry requested · waiting to dispatch',
-  entering: 'Awaiting entry observation',
-  entry_open: 'Entry opening confirmed by the backend',
-  release_pending: 'Release requested · waiting to dispatch',
-  releasing: 'Awaiting release observation',
+  idle: 'No active hold',
+  protect_pending: 'Preparing protection',
+  protecting: 'Confirming protection',
+  protected: 'Protection confirmed',
+  entry_pending: 'Opening for your vehicle',
+  entering: 'Confirming entry',
+  entry_open: 'Entry open',
+  release_pending: 'Releasing reservation',
+  releasing: 'Confirming release',
   blocked: 'Bay blocked · recovery required',
   uncertain: 'Hardware outcome unknown',
 };
@@ -57,49 +57,50 @@ const explainReason = (value: string) => reasonCopy[value] ?? value.replaceAll('
 function deadlineLabel(deadline: string | null, now: number) {
   if (!deadline) return null;
   const seconds = Math.max(0, Math.ceil((Date.parse(deadline) - now) / 1_000));
-  return seconds > 0 ? `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')} to the server deadline` : 'Deadline reached · checking the bay';
+  return seconds > 0 ? `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')} remaining` : 'Checking deadline';
 }
 
 function WorkflowCard({ workflow, observation, fresh, busy, now, profile, refresh }: {
-  workflow: HardwareWorkflow;
-  observation: HardwareLock | undefined;
-  fresh: boolean;
-  busy: boolean;
-  now: number;
-  profile: DriverProfile | null;
-  refresh: () => Promise<void>;
+  workflow: HardwareWorkflow; observation: HardwareLock | undefined; fresh: boolean; busy: boolean; now: number;
+  profile: DriverProfile | null; refresh: () => Promise<void>;
 }) {
   const schedule = useHardwareSlots(workflow.bay.id);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const observationFresh = fresh && observation?.telemetryFresh && observation.lastSeenAt && now - Date.parse(observation.lastSeenAt) <= 5_000 && now - Date.parse(observation.lastSeenAt) >= 0;
-  const activeSlot = schedule.snapshot?.slots.find(slot => slot.isMine && slot.bayId === workflow.bay.id && slot.activatedAt !== null && ['active', 'blocked', 'cancel_requested'].includes(slot.status));
-  const deadline = deadlineLabel(workflow.reservation.expiresAt, now);
+  const protectionReady = workflow.capabilities.canReserve && fresh && !!observationFresh && observation?.occupancy === 'vacant' &&
+    observation.barrier === 'lowered' && observation.whitelist.mode === 'disabled' && observation.activeErrors.length === 0 && observation.waterIngress === false;
+  const activeSlot = schedule.snapshot?.slots.find(slot => slot.isMine && slot.bayId === workflow.bay.id &&
+    ['scheduled', 'active', 'blocked', 'cancel_requested'].includes(slot.status) &&
+    (slot.activatedAt !== null || Date.parse(slot.protectionStartsAt ?? slot.startsAt) <= now));
+  const barrierOnly = workflow.bay.connectors.some(connector => connector.enabled && connector.type === 'BARRIER_TEST');
+  const controlsReady = workflow.controlsEnabled === true && workflow.interlocksConfirmed === true;
+  const noHeldReservation = workflow.reservation.expiresAt === null && workflow.reservation.id === null && !workflow.reservation.isMine;
+  const intentPhaseAllowed = workflow.phase === 'idle' || workflow.phase === 'blocked' && workflow.reason === 'TELEMETRY_UNKNOWN';
+  const noPendingOperation = !workflow.operation || ['confirmed', 'cancelled'].includes(workflow.operation.status);
+  const knownDeviceBlock = observation?.occupancy === 'occupied' || observation?.lastReportedPresence === 'occupied' ||
+    observation?.waterIngress === true || !!observation?.activeErrors.length;
+  const nowAvailable = fresh && controlsReady && noHeldReservation && intentPhaseAllowed && noPendingOperation && !knownDeviceBlock;
   const needsAttention = workflow.phase === 'blocked' || workflow.phase === 'uncertain';
-
+  const phaseText = !fresh ? 'Refresh status' : workflow.reason === 'TELEMETRY_UNKNOWN' ? 'Waiting for device update' : phaseLabels[workflow.phase];
+  const lastReportedBarrier = observation && ['raised', 'lowered', 'raising', 'lowering'].includes(observation.status) ? observation.status : observation?.barrier ?? 'unknown';
   return <View style={ui.card}>
-    <View style={styles.bayHeading}><View style={ui.flex}><Text style={ui.eyebrow}>DESIGNATED ECURIOUS BAY</Text><Text style={ui.sectionTitle}>{workflow.bay.label}</Text><Text style={ui.small}>{workflow.bay.lockId}</Text></View><View style={styles.badge}><Text style={styles.badgeText}>HARDWARE</Text></View></View>
-    <View style={[styles.phase, needsAttention && styles.attention]} accessibilityLiveRegion="polite"><Text style={styles.phaseText}>{fresh ? phaseLabels[workflow.phase] : 'Current workflow status unknown · refresh required'}</Text>{workflow.reason ? <Text style={ui.small}>{explainReason(workflow.reason)}</Text> : null}</View>
-    <Text style={ui.label}>{workflow.reservation.isMine ? 'Your reservation' : workflow.reservation.expiresAt ? 'Reserved by another driver' : 'Reservation ownership'}</Text>
-    <Text style={ui.body}>{workflow.reservation.isMine ? 'Your authenticated session owns this reservation. Entry also requires the backend to match its booked plate.' : workflow.reservation.expiresAt ? 'Another session holds this bay. Its owner and reservation ID are private.' : 'No active reservation is reported in this snapshot.'}</Text>
-    {deadline ? <View style={styles.deadline}><Text style={styles.deadlineText}>{deadline}</Text><Text style={ui.small}>Server deadline: {time(workflow.reservation.expiresAt)}</Text></View> : null}
-    <View style={styles.readings}><View style={styles.reading}><Text style={ui.small}>Barrier observation</Text><Text style={styles.readingValue}>{observationFresh ? observation?.barrier : 'unknown'}</Text></View><View style={styles.reading}><Text style={ui.small}>Occupancy observation</Text><Text style={styles.readingValue}>{observationFresh ? observation?.occupancy : 'unknown'}</Text></View></View>
-    <Text style={ui.small}>Provider observation: {time(observation?.lastSeenAt ?? null)}. A fresh application response can still contain stale sensor data.</Text>
-    {!observationFresh && observation ? <Text style={ui.small}>Last reported: barrier {observation.barrier}, occupancy {observation.lastReportedPresence}. Current state requires a report no older than five seconds.</Text> : null}
-    {observation?.activeErrors.length ? <View style={styles.attention}><Text style={ui.label}>Device errors</Text>{observation.activeErrors.map((error, index) => <Text style={ui.small} key={`${error}-${index}`}>{error.replaceAll('_', ' ')}</Text>)}</View> : null}
-    {workflow.operation ? <View style={styles.operation}><Text style={ui.label}>Latest command: {workflow.operation.kind}</Text><Text style={ui.small}>State: {workflow.operation.status}. Target: {workflow.operation.target}. Requested: {time(workflow.operation.requestedAt)}.</Text>{workflow.operation.status === 'acknowledged' ? <Text style={styles.pendingCopy}>Command accepted. Waiting for a fresh hardware observation; movement is not yet confirmed.</Text> : null}{workflow.operation.status === 'uncertain' ? <Text style={styles.pendingCopy}>The command is quarantined. Operator review is required; refreshing alone cannot authorize another movement.</Text> : null}</View> : null}
-
-    <HardwareSlotForm bay={workflow.bay} profile={profile} now={now} schedule={schedule} />
+    <View style={styles.bayHeading}><View style={ui.flex}><Text style={ui.eyebrow}>{barrierOnly ? 'ECURIOUS · BARRIER-ONLY TEST' : 'ECURIOUS BAY'}</Text><Text style={ui.sectionTitle}>{workflow.bay.label}</Text></View></View>
+    <Text style={ui.label}>{workflow.bay.lockId}</Text>
+    <View style={[styles.phase, needsAttention && styles.attention]}><Text style={styles.phaseText}>{phaseText}</Text>{needsAttention && workflow.reason ? <Text style={ui.small}>{explainReason(workflow.reason)}</Text> : null}</View>
+    <View style={styles.readings}><View style={styles.reading}><Text style={ui.small}>Barrier</Text><Text style={styles.readingValue}>{observationFresh ? observation?.barrier : 'unknown'}</Text></View><View style={styles.reading}><Text style={ui.small}>Occupancy</Text><Text style={styles.readingValue}>{observationFresh ? observation?.occupancy : 'unknown'}</Text></View></View>
+    <Text style={ui.small}>Device report {time(observation?.lastSeenAt ?? null)}</Text>
+    {!observationFresh && observation ? <Text style={ui.small}>Last reported {lastReportedBarrier} · {observation.lastReportedPresence}. Current state is unknown.</Text> : null}
+    {activeSlot ? <Text style={ui.small}>{activeSlot.entryAuthorizedAt ? 'Plate matched · entry authorized' : activeSlot.activatedAt === null ? 'Reservation pending · protection waits for a fresh device report. Your arrival window continues while waiting.' : 'Your reservation is shown above. Entry waits for a matching plate.'}</Text> : <HardwareSlotForm bay={workflow.bay} profile={profile} now={now} schedule={schedule} nowAvailable={nowAvailable} bookingsAvailable={controlsReady} protectionPending={!protectionReady} />}
+    {!activeSlot && !nowAvailable ? <ActionButton label="Refresh device" onPress={() => void refresh()} disabled={busy} variant="secondary" /> : null}
     <HardwareAlternatives alternatives={schedule.snapshot?.alternatives} />
-    <View style={styles.operation}><Text style={ui.label}>Booked windows for this bay</Text>{schedule.snapshot?.slots.filter(slot => slot.bayId === workflow.bay.id && !['cancelled', 'completed', 'expired'].includes(slot.status)).slice(0, 8).map((slot, index) => <Text key={slot.id ?? `${slot.startsAt}-${index}`} style={ui.small}>{formatHardwareInstant(slot.startsAt)} → {formatHardwareInstant(slot.endsAt)} · {slot.isMine ? 'your booking' : 'booked'} · {slot.status.replaceAll('_', ' ')}</Text>)}{!schedule.fresh ? <Text style={ui.small}>Refresh the schedule before relying on these windows.</Text> : null}</View>
-
-    {workflow.reservation.isMine && workflow.reservation.id ? <>
-      <ActionButton label="Check booked plate and entry status" onPress={() => void refresh()} disabled={busy} />
-      <Link href={{ pathname: '/session', params: { bayId: workflow.bay.id } }} asChild><Pressable accessibilityRole="button" style={ui.button}><Text style={ui.buttonText}>Open session details</Text></Pressable></Link>
-      <ActionButton label={activeSlot?.status === 'cancel_requested' ? 'Cancellation pending · awaiting safe cleanup' : 'Request cancellation / release'} variant="secondary" onPress={() => { if (activeSlot?.id) void schedule.cancel(activeSlot.id); }} disabled={!fresh || busy || schedule.busy || !schedule.fresh || !workflow.capabilities.canRequestRelease || !activeSlot?.canCancel} />
-      {!activeSlot ? <Text style={ui.small}>Restore this reservation's schedule row before requesting cancellation.</Text> : null}
-      <Text style={ui.small}>Entry waits for the backend to match a fresh camera observation against the booked plate. Vehicle presence does not confirm charging.</Text>
-    </> : null}
-    {needsAttention ? <Text style={styles.pendingCopy}>{workflow.phase === 'blocked' ? 'Keep this reservation visible and ask the Ecurious operator to inspect the bay. Missing plate data never proves vacancy.' : 'Do not resend a timed-out command. Unacknowledged delivery requires operator review after stopping dispatchers; refreshing or seeing the target position alone cannot clear quarantine.'}</Text> : null}
-    <Text style={ui.small}>An elapsed countdown never confirms vacancy or authorizes movement. Physical charging evidence remains unverified.</Text>
+    <Pressable accessibilityRole="button" accessibilityState={{ expanded: detailsOpen }} onPress={() => setDetailsOpen(open => !open)} style={styles.detailToggle}><Text style={styles.detailToggleText}>{detailsOpen ? 'Hide device details −' : 'Device details +'}</Text></Pressable>
+    {detailsOpen ? <View style={styles.operation}>
+      {workflow.operation ? <Text style={ui.small}>Operation {workflow.operation.kind} · {workflow.operation.status}</Text> : null}
+      {observation?.activeErrors.map((error, index) => <Text key={index} style={styles.pendingCopy}>{error.replaceAll('_', ' ')}</Text>)}
+      <Text style={ui.label}>Booked arrivals</Text>
+      {schedule.snapshot?.slots.filter(slot => !['cancelled', 'completed', 'expired'].includes(slot.status)).slice(0, 8).map((slot, index) => <Text key={slot.id ?? index} style={ui.small}>{formatHardwareInstant(slot.startsAt)} · {slot.isMine ? 'yours' : 'booked'}</Text>)}
+      <ActionButton label="Refresh device" onPress={() => void refresh()} disabled={busy} variant="secondary" />
+    </View> : null}
   </View>;
 }
 
@@ -109,48 +110,56 @@ export default function HardwareScreen() {
   const { profile } = useProfile();
   const [now, setNow] = useState(Date.now);
   const anchor = useRef({ serverAt: Date.now(), clientAt: Date.now() });
-
   useEffect(() => {
-    if (!hardware.snapshot) return;
-    anchor.current = { serverAt: Date.parse(hardware.snapshot.serverNow), clientAt: Date.now() };
-    setNow(anchor.current.serverAt);
-  }, [hardware.snapshot]);
+    const serverNow = schedule.snapshot?.serverNow ?? hardware.snapshot?.serverNow;
+    if (serverNow) { anchor.current = { serverAt: Date.parse(serverNow), clientAt: Date.now() }; setNow(anchor.current.serverAt); }
+  }, [hardware.snapshot, schedule.snapshot]);
   useEffect(() => { const timer = setInterval(() => setNow(anchor.current.serverAt + Date.now() - anchor.current.clientAt), 1_000); return () => clearInterval(timer); }, []);
-  const ownSlots = schedule.snapshot?.slots.filter(slot => slot.isMine).sort((left, right) => Date.parse(left.startsAt) - Date.parse(right.startsAt)) ?? [];
-
+  const ownSlots = schedule.snapshot?.slots.filter(slot => slot.isMine && !['completed', 'cancelled', 'expired'].includes(slot.status)).sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt)) ?? [];
+  const upcoming = ownSlots.filter(slot => slot.activatedAt === null && Date.parse(slot.protectionStartsAt ?? slot.startsAt) > now);
+  const current = ownSlots.filter(slot => !upcoming.includes(slot));
+  const bookingCard = (slot: typeof ownSlots[number], future: boolean) => {
+    const workflow = hardware.snapshot?.workflows.find(item => item.bay.id === slot.bayId);
+    const deadline = slot.protectionDeadlineAt ?? slot.endsAt;
+    const status = !schedule.fresh ? 'Refresh status' : future ? 'Upcoming' : slot.arrivedAt ? 'Vehicle arrived' : slot.entryAuthorizedAt ? 'Entry authorized' : slot.status === 'cancel_requested' ? 'Releasing' : workflow?.phase === 'protected' ? 'Protection confirmed' : slot.activatedAt === null ? 'Reservation pending' : slot.status === 'blocked' ? 'Blocked' : 'Protection pending';
+    return <View key={slot.id!} style={ui.card}>
+      <View style={styles.bayHeading}><Text style={[ui.sectionTitle, ui.flex]}>{workflow?.bay.label ?? 'Your hardware bay'}</Text><Text style={styles.badgeText}>{status}</Text></View>
+      <Text style={ui.body}>Arrival {formatHardwareInstant(slot.startsAt)}</Text>
+      {!future && slot.activatedAt === null ? <Text style={ui.small}>Reservation pending · protection waits for a fresh device report. The bay is not protected yet.</Text> : null}
+      {!slot.entryAuthorizedAt && !slot.arrivedAt ? <Text style={styles.bookingClock}>{deadlineLabel(future ? slot.protectionStartsAt ?? slot.startsAt : deadline, now)}{future ? ' · until protection' : ''}</Text> : null}
+      <HardwareBookingDetails slot={slot} policy={schedule.snapshot?.policy} fresh={schedule.fresh} busy={schedule.busy} extensionAllowed={hardware.fresh && workflow?.phase === 'protected' && now < Date.parse(deadline)} extend={schedule.extend} />
+      <View style={styles.actionsRow}><Link href={{ pathname: '/session', params: { slotId: slot.id!, bayId: slot.bayId } }} asChild><Pressable accessibilityRole="button" style={StyleSheet.flatten([ui.button, ui.secondaryButton, ui.flex])}><Text style={ui.buttonText}>View session</Text></Pressable></Link>{slot.canCancel ? <Pressable accessibilityRole="button" disabled={!schedule.fresh || schedule.busy} onPress={() => void schedule.cancel(slot.id!)} style={styles.cancelLink}><Text style={styles.detailToggleText}>Cancel</Text></Pressable> : null}</View>
+    </View>;
+  };
   return <SafeAreaView style={ui.safe}>
-    <View style={styles.header}><Link href="/activity" asChild><Pressable accessibilityRole="button" style={styles.back}><Text style={styles.backText}>‹ Activity</Text></Pressable></Link><Text style={styles.headerMode}>ECURIOUS TEST HARDWARE</Text></View>
-    <ScrollView contentContainerStyle={ui.scroll} refreshControl={<RefreshControl refreshing={hardware.refreshing} onRefresh={() => void hardware.refresh()} colors={[palette.ink]} tintColor={palette.ink} />}>
+    <View style={styles.header}><Link href="/" asChild><Pressable accessibilityRole="button" style={styles.back}><Text style={styles.backText}>‹ Map</Text></Pressable></Link><Link href="/sign-in" asChild><Pressable accessibilityRole="button" style={styles.back}><Text style={styles.backText}>Account</Text></Pressable></Link></View>
+    <ScrollView contentContainerStyle={ui.scroll} refreshControl={<RefreshControl refreshing={hardware.refreshing || schedule.refreshing} onRefresh={() => { void hardware.refresh(); void schedule.refresh(); }} colors={[palette.ink]} tintColor={palette.ink} />}>
       <View style={ui.content}>
-        <View><Text style={ui.eyebrow}>RESERVE A PHYSICAL BAY</Text><Text style={styles.title}>Now, or ahead.</Text><Text style={ui.body}>Reserve now for ten free minutes, or book an arrival time for €1 mock. Advance protection starts ten minutes before arrival. Public map holds and the simulator remain separate.</Text></View>
-        <View style={ui.notice}><Text style={ui.label}>Your booking session</Text><Text style={ui.small}>The app restores a sign-in session on this device to own your bookings. A guest session is created automatically when needed. Your local driver profile is separate from that sign-in and does not verify your contact details.</Text><Link href="/sign-in" asChild><Pressable accessibilityRole="button" style={[ui.button, ui.secondaryButton]}><Text style={ui.buttonText}>Sign in & account</Text></Pressable></Link></View>
-        {schedule.error ? <View style={[ui.notice, ui.errorNotice]}><Text style={ui.noticeTitle}>Schedule connection needs attention</Text><Text style={ui.body}>{schedule.error}</Text><ActionButton label="Refresh time slots" onPress={() => void schedule.refresh()} disabled={schedule.busy || schedule.refreshing} variant="secondary" /></View> : null}
-        <View style={ui.card}>
-          <Text style={ui.sectionTitle}>Your time slots</Text>
-          {schedule.loading ? <ActivityIndicator color={palette.ink} /> : ownSlots.length === 0 ? <Text style={ui.body}>{schedule.fresh ? 'No time-slot bookings were returned for this session.' : 'Refresh the booking service to restore your schedule.'}</Text> : ownSlots.map(slot => <View key={slot.id!} style={styles.slot}>
-            <Text style={ui.label}>{slot.status.replaceAll('_', ' ')} · {slot.maskedPlate ?? 'Vehicle plate hidden'}</Text>
-            <Text style={ui.small}>{formatHardwareInstant(slot.startsAt)} → {formatHardwareInstant(slot.endsAt)}</Text>
-            <HardwareBookingDetails slot={slot} policy={schedule.snapshot?.policy} fresh={schedule.fresh} busy={schedule.busy} extensionAllowed={hardware.fresh && hardware.snapshot?.workflows.some(workflow => workflow.bay.id === slot.bayId && !['blocked', 'uncertain'].includes(workflow.phase)) === true && now < Date.parse(slot.endsAt)} extend={schedule.extend} />
-            <Link href={{ pathname: '/session', params: { slotId: slot.id!, bayId: slot.bayId } }} asChild><Pressable accessibilityRole="button" style={[ui.button, ui.secondaryButton]}><Text style={ui.buttonText}>View session</Text></Pressable></Link>
-            {slot.canCancel ? <ActionButton label="Cancel time slot" onPress={() => void schedule.cancel(slot.id!)} disabled={!schedule.fresh || schedule.busy} variant="secondary" /> : null}
-          </View>)}
-          <ActionButton label={schedule.refreshing ? 'Refreshing…' : 'Refresh schedule'} onPress={() => void schedule.refresh()} disabled={schedule.loading || schedule.refreshing || schedule.busy} variant="secondary" />
-          <HardwareAlternatives alternatives={schedule.snapshot?.alternatives} />
-        </View>
-        {hardware.error ? <View style={[ui.notice, ui.errorNotice]} accessibilityLiveRegion="polite"><Text style={ui.noticeTitle}>Hardware workflow needs attention</Text><Text style={ui.body}>{hardware.error}</Text>{hardware.snapshot ? <Text style={ui.small}>Last received information is retained below. Actions pause while status is unknown.</Text> : null}</View> : null}
-        {hardware.loading ? <View style={ui.notice}><ActivityIndicator color={palette.ink} /><Text style={ui.body}>Reading the designated bay…</Text></View> : null}
-        {hardware.snapshot && !hardware.snapshot.commandsEnabled ? <View style={ui.card}><Text style={ui.sectionTitle}>Hardware commands are not enabled</Text><Text style={ui.body}>{hardware.snapshot.reason ? explainReason(hardware.snapshot.reason) : 'The backend is waiting for the designated bay configuration and shared reservation setup.'}</Text><Text style={ui.small}>Read-only diagnostics remain available in Activity. No barrier command has been requested from this screen.</Text></View> : null}
-        {hardware.snapshot?.commandsEnabled && hardware.snapshot.reason ? <View style={ui.notice}><Text style={ui.body}>{explainReason(hardware.snapshot.reason)}</Text></View> : null}
-        {hardware.snapshot?.commandsEnabled && hardware.snapshot.workflows.length === 0 ? <View style={ui.card}><Text style={ui.sectionTitle}>No designated bay registered</Text><Text style={ui.body}>The backend returned no hardware workflows for this session.</Text></View> : null}
+        <View><Text style={ui.eyebrow}>ECURIOUS HARDWARE DEMO</Text><Text style={styles.title}>Hardware test.</Text></View>
+        {schedule.error || hardware.error ? <View style={[ui.notice, ui.errorNotice]}><Text style={ui.body}>{schedule.error ?? hardware.error}</Text><ActionButton label="Reconnect" onPress={() => { void hardware.refresh(); void schedule.refresh(); }} disabled={hardware.busy || schedule.busy} variant="secondary" /></View> : null}
+        {current.length ? <><Text style={ui.sectionTitle}>Current reservation</Text>{current.map(slot => bookingCard(slot, false))}</> : null}
+        {upcoming.length ? <><Text style={ui.sectionTitle}>Upcoming</Text>{upcoming.map(slot => bookingCard(slot, true))}</> : null}
+        {hardware.loading ? <ActivityIndicator color={palette.ink} /> : null}
+        {hardware.snapshot && !hardware.snapshot.commandsEnabled ? <View style={ui.card}>
+          <Text style={ui.sectionTitle}>lock-0002 · setup pending</Text>
+          <Text style={ui.label}>Barrier-only test · no charging</Text>
+          <Text style={ui.body}>Live movement is disabled until the Ecurious operator confirms occupancy interlocks and automatic re-raising, checks that OCR works with automatic camera unlocking disabled, and activates this test bay.</Text>
+          <Text style={ui.small}>Save a test plate in Profile. Once activated, reserve here and present that plate to the onboard camera; the app will follow protection, plate-matched entry and sensor-confirmed departure.</Text>
+          <Link href="/profile" asChild><Pressable accessibilityRole="button" style={ui.button}><Text style={ui.buttonText}>{profile?.licensePlate.trim() ? 'Review saved test plate' : 'Add test plate in Profile'}</Text></Pressable></Link>
+          <Link href="/activity" asChild><Pressable accessibilityRole="button" style={StyleSheet.flatten([ui.button, ui.secondaryButton])}><Text style={ui.buttonText}>View read-only device status</Text></Pressable></Link>
+          <Link href="/simulation" asChild><Pressable accessibilityRole="button" style={StyleSheet.flatten([ui.button, ui.secondaryButton])}><Text style={ui.buttonText}>Rehearse with fictional cars</Text></Pressable></Link>
+        </View> : null}
         {hardware.snapshot?.commandsEnabled ? hardware.snapshot.workflows.map(workflow => <WorkflowCard key={workflow.bay.id} workflow={workflow} observation={hardware.snapshot?.observations.find(item => item.id === workflow.bay.lockId)} fresh={hardware.fresh} busy={hardware.busy} now={now} profile={profile} refresh={hardware.refresh} />) : null}
-        <ActionButton label={hardware.busy ? 'Waiting for request reconciliation…' : hardware.refreshing ? 'Refreshing…' : 'Refresh designated bay'} onPress={() => void hardware.refresh()} disabled={hardware.busy || hardware.loading || hardware.refreshing} variant="secondary" />
-        <Text style={ui.small}>Reads refresh every five seconds while the app is active. Actions pause after 15 seconds without a successful workflow read. These are app connection rules, not hardware safety guarantees.</Text>
+        <HardwareAlternatives alternatives={schedule.snapshot?.alternatives} />
+        <Text style={ui.small}>Hardware demo · payments simulated · charging data unavailable</Text>
       </View>
     </ScrollView>
   </SafeAreaView>;
 }
 
 const styles = StyleSheet.create({
+  detailToggle: { minHeight: 40, justifyContent: 'center' }, detailToggleText: { color: palette.muted, fontSize: 13, fontWeight: '700' },
+  bookingClock: { color: palette.ink, fontSize: 24, fontWeight: '800', fontVariant: ['tabular-nums'] }, actionsRow: { flexDirection: 'row', alignItems: 'center', gap: 14 }, cancelLink: { padding: 10, minHeight: 44, justifyContent: 'center' },
   header: { minHeight: 62, paddingHorizontal: 20, flexDirection: 'row', gap: 12, alignItems: 'center', justifyContent: 'space-between' },
   back: { minHeight: 44, justifyContent: 'center' },
   backText: { fontSize: 15, color: palette.ink, fontWeight: '700' },

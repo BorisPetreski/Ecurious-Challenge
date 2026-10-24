@@ -13,6 +13,8 @@ export interface DirectoryHold {
 export interface DirectoryHoldSnapshot {
   serverNow: string;
   holds: DirectoryHold[];
+  /** Caller-owned current and future bookings, even outside the queried map. */
+  myBookings?: DirectoryBooking[];
 }
 
 export interface DirectoryReservation {
@@ -22,6 +24,20 @@ export interface DirectoryReservation {
   status: 'held' | 'cancelled' | 'expired';
   createdAt: string;
   expiresAt: string;
+}
+
+export interface DirectoryBooking extends DirectoryReservation {
+  bookingMode: 'legacy' | 'now' | 'scheduled';
+  startsAt: string;
+  protectionStartsAt: string;
+  reservationFeeCents: number;
+  paymentStatus: 'not_required' | 'mock_paid';
+  extensionMinutes: number;
+}
+
+export interface DirectoryBookingOptions {
+  bookingMode: 'now' | 'scheduled';
+  startsAt?: string;
 }
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -45,7 +61,7 @@ export function isDirectoryHoldSnapshot(value: unknown, queriedStationIds?: read
   const slots = new Set<string>();
   const ownedIds = new Set<string>();
   const serverNow = Date.parse(value.serverNow);
-  return value.holds.every(hold => {
+  const validHolds = value.holds.every(hold => {
     if (!record(hold) || !isDirectoryStationId(hold.stationId) || !isDirectorySlotKey(hold.slotKey) ||
       !timestamp(hold.reservedUntil) || Date.parse(hold.reservedUntil) <= serverNow || typeof hold.isMine !== 'boolean' ||
       (hold.isMine ? !isUuid(hold.myReservationId) : hold.myReservationId !== null)) return false;
@@ -61,10 +77,34 @@ export function isDirectoryHoldSnapshot(value: unknown, queriedStationIds?: read
     }
     return true;
   });
+  if (!validHolds) return false;
+  if (value.myBookings === undefined) return true; // Earlier read contract.
+  if (!Array.isArray(value.myBookings) || value.myBookings.length > 10_000) return false;
+  const bookingIds = new Set<string>();
+  return value.myBookings.every(booking => {
+    if (!isDirectoryBooking(booking) || booking.status !== 'held' || Date.parse(booking.expiresAt) <= serverNow || bookingIds.has(booking.id)) return false;
+    bookingIds.add(booking.id);
+    return true;
+  });
 }
 
 export function isDirectoryReservation(value: unknown): value is DirectoryReservation {
   return record(value) && isUuid(value.id) && isDirectoryStationId(value.stationId) && isDirectorySlotKey(value.slotKey) &&
     ['held', 'cancelled', 'expired'].includes(value.status as string) && timestamp(value.createdAt) && timestamp(value.expiresAt) &&
     Date.parse(value.expiresAt) > Date.parse(value.createdAt);
+}
+
+export function isDirectoryBooking(value: unknown): value is DirectoryBooking {
+  if (!isDirectoryReservation(value) || !record(value) || !['legacy', 'now', 'scheduled'].includes(value.bookingMode as string) ||
+    !timestamp(value.startsAt) || !timestamp(value.protectionStartsAt) ||
+    typeof value.reservationFeeCents !== 'number' || !Number.isInteger(value.reservationFeeCents) || value.reservationFeeCents < 0 || value.reservationFeeCents > 1200 ||
+    !['not_required', 'mock_paid'].includes(value.paymentStatus as string) ||
+    typeof value.extensionMinutes !== 'number' || !Number.isInteger(value.extensionMinutes) || value.extensionMinutes < 0 || value.extensionMinutes > 110 || value.extensionMinutes % 10 !== 0) return false;
+  const start = Date.parse(value.startsAt);
+  const protection = Date.parse(value.protectionStartsAt);
+  const end = Date.parse(value.expiresAt);
+  if (protection > start || protection < start - 10 * 60_000 || end <= start) return false;
+  if (value.bookingMode !== 'legacy' && end !== start + (10 + value.extensionMinutes) * 60_000) return false;
+  const expectedFee = (value.bookingMode === 'scheduled' ? 100 : 0) + value.extensionMinutes * 10;
+  return value.reservationFeeCents === expectedFee && value.paymentStatus === (expectedFee ? 'mock_paid' : 'not_required');
 }

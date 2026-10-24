@@ -1,4 +1,4 @@
-import { createContext, type PropsWithChildren, useContext, useEffect, useState } from 'react';
+import { createContext, type PropsWithChildren, useContext, useEffect, useRef, useState } from 'react';
 
 import { useBookingState, type UseBookingsResult } from '@/hooks/use-bookings';
 import { BOOKINGS_CONFIGURED, getBookingAccountClient } from '@/lib/bookings-api';
@@ -6,17 +6,20 @@ import { BOOKINGS_CONFIGURED, getBookingAccountClient } from '@/lib/bookings-api
 const BookingsContext = createContext<UseBookingsResult | null>(null);
 
 export function BookingsProvider({ children }: PropsWithChildren) {
-  const [identity, setIdentity] = useState('restoring');
+  const [identityGeneration, setIdentityGeneration] = useState(0);
+  const owner = useRef<string | null>(null);
   useEffect(() => {
     if (!BOOKINGS_CONFIGURED) return;
     // Reset every allocation screen on a UID switch. A delayed response from
     // the former account must never become the new account's cached snapshot.
     const { data } = getBookingAccountClient().auth.onAuthStateChange((_event, session) => {
-      setIdentity(session?.user.id ?? 'signed-out');
+      const nextOwner = session?.user.id ?? null;
+      if (owner.current !== null && owner.current !== nextOwner) setIdentityGeneration(generation => generation + 1);
+      owner.current = nextOwner;
     });
     return () => data.subscription.unsubscribe();
   }, []);
-  return <BookingIdentity key={identity}>{children}</BookingIdentity>;
+  return <BookingIdentity key={identityGeneration}>{children}</BookingIdentity>;
 }
 
 function BookingIdentity({ children }: PropsWithChildren) {

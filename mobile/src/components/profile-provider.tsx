@@ -15,6 +15,7 @@ interface ProfileContextValue {
   loadError: string | null;
   setupSeen: boolean;
   saveProfile: (input: ProfileInput) => Promise<boolean>;
+  clearProfile: () => Promise<boolean>;
   skipSetup: () => Promise<boolean>;
   reload: () => Promise<void>;
 }
@@ -31,6 +32,14 @@ async function writeStored(key: string, value: string): Promise<void> {
     return;
   }
   await SecureStore.setItemAsync(key, value, { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY });
+}
+
+async function deleteStored(key: string): Promise<void> {
+  if (Platform.OS === 'web') {
+    webMemory.delete(key);
+    return;
+  }
+  await SecureStore.deleteItemAsync(key);
 }
 
 export function ProfileProvider({ children }: PropsWithChildren) {
@@ -124,6 +133,25 @@ export function ProfileProvider({ children }: PropsWithChildren) {
     }
   }), [enqueue]);
 
+  const clearProfile = useCallback((): Promise<boolean> => enqueue(async () => {
+    try {
+      // Erasure is explicit even when an old profile cannot be parsed. Serialize
+      // with save/reload so a pending storage operation cannot restore it later.
+      await deleteStored(PROFILE_KEY);
+      if (await readStored(PROFILE_KEY) !== null) throw new Error('Profile deletion unconfirmed');
+      storageReady.current = true;
+      if (mounted.current) {
+        setProfile(null);
+        setLoadError(null);
+        setError(null);
+      }
+      return true;
+    } catch {
+      if (mounted.current) setError('Profile deletion could not be confirmed. Retry before assuming this device’s saved details are removed.');
+      return false;
+    }
+  }), [enqueue]);
+
   useEffect(() => {
     mounted.current = true;
     void reload();
@@ -131,7 +159,7 @@ export function ProfileProvider({ children }: PropsWithChildren) {
   }, [reload]);
 
   return (
-    <ProfileContext.Provider value={{ profile, loading, error, loadError, setupSeen, saveProfile, skipSetup, reload }}>
+    <ProfileContext.Provider value={{ profile, loading, error, loadError, setupSeen, saveProfile, clearProfile, skipSetup, reload }}>
       {children}
     </ProfileContext.Provider>
   );

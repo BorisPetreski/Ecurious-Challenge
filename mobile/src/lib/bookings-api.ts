@@ -7,11 +7,12 @@ import { Platform } from 'react-native';
 
 import { isBookingReservation, isBookingSnapshot, isUuid, type BookingReservation, type BookingSnapshot, type HoldMinutes } from './booking-contract';
 import {
-  canonicalDirectoryStationIds, isDirectoryHoldSnapshot, isDirectoryReservation, isDirectorySlotKey, isDirectoryStationId,
-  type DirectoryHoldSnapshot, type DirectoryReservation,
+  canonicalDirectoryStationIds, isDirectoryBooking, isDirectoryHoldSnapshot, isDirectoryReservation, isDirectorySlotKey, isDirectoryStationId,
+  type DirectoryBooking, type DirectoryBookingOptions, type DirectoryHoldSnapshot, type DirectoryReservation,
 } from './directory-booking-contract';
 export { isBookingReservation, isBookingSnapshot } from './booking-contract';
 export type { BayAvailability, BayConnector, BookingSnapshot, BookingReservation, HoldMinutes } from './booking-contract';
+export type { DirectoryBooking, DirectoryBookingOptions } from './directory-booking-contract';
 
 export class BookingApiError extends Error {
   constructor(message: string, readonly code = 'BOOKING_UNAVAILABLE') {
@@ -252,6 +253,10 @@ const RPC_ERRORS: Record<string, string> = {
   INVALID_STATIONS: 'The directory area is too large or invalid. Search a smaller area and refresh reservations.',
   INVALID_SLOT: 'This listed plug cannot be identified. Search the map again and choose a plug.',
   PLUG_RESERVED: 'Someone else has reserved this listed plug in BayReady. Refresh to see when the hold ends.',
+  INVALID_BOOKING_MODE: 'Choose Reserve now or Schedule arrival.',
+  INVALID_SCHEDULE: 'Choose an arrival time in the future and within the next seven days.',
+  BOOKING_NOT_ACTIVE: 'This booking has ended. Refresh before making another reservation.',
+  EXTENSION_LIMIT: 'This booking has reached its extension limit.',
 };
 
 function rpcFailure(error: unknown, mutation: boolean): BookingApiError {
@@ -336,7 +341,7 @@ export async function fetchDirectoryHolds(stationIds: readonly number[], signal?
 export async function reserveDirectoryPlug(stationId: number, slotKey: string, minutes: HoldMinutes): Promise<DirectoryReservation> {
   if (!isDirectoryStationId(stationId)) throw new BookingApiError(RPC_ERRORS.INVALID_STATION, 'INVALID_STATION');
   if (!isDirectorySlotKey(slotKey)) throw new BookingApiError(RPC_ERRORS.INVALID_SLOT, 'INVALID_SLOT');
-  if (![5, 10, 15].includes(minutes)) throw new BookingApiError(RPC_ERRORS.INVALID_HOLD, 'INVALID_HOLD');
+  if (minutes !== 10) throw new BookingApiError('Reserve now provides ten free minutes. Use Extend for another ten minutes at a mock €1.', 'INVALID_HOLD');
   try {
     await ensureSession();
     const { data, error } = await getClient().rpc('reserve_directory_plug', {
@@ -348,6 +353,54 @@ export async function reserveDirectoryPlug(stationId: number, slotKey: string, m
     if (error) throw rpcFailure(error, true);
     if (!isDirectoryReservation(data) || data.stationId !== stationId || data.slotKey !== slotKey) {
       throw new BookingApiError('The directory hold result was unreadable. Refresh before trying again; the listed plug may already be held.', 'INVALID_RESPONSE');
+    }
+    return data;
+  } catch (error) {
+    if (error instanceof BookingApiError) throw error;
+    throw rpcFailure(error, true);
+  }
+}
+
+/** Software-only public-directory booking; a fee is a mock record, never a charge. */
+export async function reserveDirectoryBooking(
+  stationId: number, slotKey: string, options: DirectoryBookingOptions, requestId = randomUUID(),
+): Promise<DirectoryBooking> {
+  if (!isDirectoryStationId(stationId)) throw new BookingApiError(RPC_ERRORS.INVALID_STATION, 'INVALID_STATION');
+  if (!isDirectorySlotKey(slotKey)) throw new BookingApiError(RPC_ERRORS.INVALID_SLOT, 'INVALID_SLOT');
+  if (!options || !['now', 'scheduled'].includes(options.bookingMode)) throw new BookingApiError(RPC_ERRORS.INVALID_BOOKING_MODE, 'INVALID_BOOKING_MODE');
+  if (!isUuid(requestId)) throw new BookingApiError(RPC_ERRORS.REQUEST_ID_REQUIRED, 'REQUEST_ID_REQUIRED');
+  if (options.bookingMode === 'now' ? options.startsAt !== undefined : typeof options.startsAt !== 'string' || !Number.isFinite(Date.parse(options.startsAt))) {
+    throw new BookingApiError(RPC_ERRORS.INVALID_SCHEDULE, 'INVALID_SCHEDULE');
+  }
+  try {
+    await ensureSession();
+    const { data, error } = await getClient().rpc('reserve_directory_booking', {
+      p_station_id: stationId, p_slot_key: slotKey, p_booking_mode: options.bookingMode,
+      p_starts_at: options.bookingMode === 'scheduled' ? options.startsAt : null, p_request_id: requestId,
+    }).retry(false);
+    if (error) throw rpcFailure(error, true);
+    if (!isDirectoryBooking(data) || data.stationId !== stationId || data.slotKey !== slotKey || data.bookingMode !== options.bookingMode ||
+      options.bookingMode === 'scheduled' && Date.parse(data.startsAt) !== Date.parse(options.startsAt!)) {
+      throw new BookingApiError('The booking result was unreadable. Refresh before trying again; it may already have succeeded.', 'INVALID_RESPONSE');
+    }
+    return data;
+  } catch (error) {
+    if (error instanceof BookingApiError) throw error;
+    throw rpcFailure(error, true);
+  }
+}
+
+export async function extendDirectoryBooking(reservationId: string, requestId = randomUUID()): Promise<DirectoryBooking> {
+  if (!isUuid(reservationId)) throw new BookingApiError(RPC_ERRORS.RESERVATION_NOT_FOUND, 'RESERVATION_NOT_FOUND');
+  if (!isUuid(requestId)) throw new BookingApiError(RPC_ERRORS.REQUEST_ID_REQUIRED, 'REQUEST_ID_REQUIRED');
+  try {
+    await ensureSession();
+    const { data, error } = await getClient().rpc('extend_directory_booking', {
+      p_reservation_id: reservationId, p_request_id: requestId,
+    }).retry(false);
+    if (error) throw rpcFailure(error, true);
+    if (!isDirectoryBooking(data) || data.id !== reservationId) {
+      throw new BookingApiError('The extension result was unreadable. Refresh before trying again; it may already have succeeded.', 'INVALID_RESPONSE');
     }
     return data;
   } catch (error) {

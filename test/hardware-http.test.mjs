@@ -42,7 +42,7 @@ test('scheduled slot HTTP routes gate writes, forward scoped identity and return
   assert.equal((await post(unavailable, '/api/hardware/slots', {})).status, 503);
   assert.equal((await fetch(`${unavailable}/api/hardware/slots`)).status, 200);
   const start = new Date(Date.now() + 60_000).toISOString();
-  const end = new Date(Date.parse(start) + 30 * 60_000).toISOString();
+  const end = new Date(Date.parse(start) + 10 * 60_000).toISOString();
   const quote = await post(unavailable, '/api/hardware/quote', { startsAt: start, endsAt: end });
   assert.equal(quote.status, 200);
   assert.equal((await quote.json()).mock, true);

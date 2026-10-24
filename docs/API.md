@@ -5,7 +5,7 @@ This reference describes the checked-in implementation. There are three separate
 | Path | Authority and current status |
 | --- | --- |
 | Phone → local Node `/api/*` | One in-memory simulator, read-only diagnostics, and an authenticated designated-bay workflow. Physical commands default off; simulation writes remain separate. |
-| Phone → Supabase Auth and RPCs | Prepared shared software holds for registered demo bays and separate directory-derived virtual app slots. Hosted migrations and anonymous-auth activation remain pending; no fallback booking is fabricated. |
+| Phone → Supabase Auth and RPCs | Prepared shared software holds for registered demo bays and separate directory-derived virtual app slots. Hosted migrations and anonymous/email Auth are configured; no fallback booking is fabricated. |
 | Phone → GoingElectric | Direct directory lookup and on-device derivation of virtual app choices. A directory result does not establish a physical bay/plug identity, occupancy, or charging-session state. |
 
 These paths do not share reservation IDs or perform an atomic transaction across services. Directory/demo holds do not reserve the simulator bay or move an Ecurious barrier. Explicitly enrolled hardware bays instead use the durable command workflow below. See [database contracts](DATABASE.md), [Supabase deployment/setup](SUPABASE.md), and the [Ecurious provider contract](ECURIOUS-API.md).
@@ -110,7 +110,7 @@ type HardwareSnapshot = {
 
 With no configured key, this route returns `200` with `configured: false`, `team: null`, and `locks: []`, without a network request. Configured failures return errors rather than a fabricated empty assignment. At most 100 lock records are accepted. Raw plates, whitelist entries, camera captures, serials, and arbitrary upstream fields are omitted.
 
-`status` and `lastReportedPresence` retain the report; derived current state becomes unknown for offline/unknown status or missing, future, or older-than-60-second telemetry. A moving barrier is never rendered as a confirmed raised/lowered position. The **60-second window is a local display policy**, not a verified hardware guarantee. The mobile panel further ages retained snapshots and marks them unknown after refresh failure. It fetches on mount and manual refresh; its five-second timer updates display age only, without hardware polling. The diagnostic route itself performs no writes and there is no SSE consumer. Guarded movement uses the separate workflow below; whitelist writes are not implemented.
+`status` and `lastReportedPresence` retain the report; derived current state becomes unknown for offline/unknown status or missing, future, or older-than-60-second telemetry. A moving barrier is never rendered as a confirmed raised/lowered position. The **60-second window is a local display policy**, not a verified hardware guarantee. The mobile panel further ages retained snapshots and marks them unknown after refresh failure. It fetches on mount and manual refresh; its five-second timer updates display age only, without hardware polling. The diagnostic route itself performs no writes and there is no SSE consumer. Guarded movement uses the separate workflow below; this flow keeps automatic whitelist access disabled. Private whitelist adapter setters exist but are not used by scheduled entry.
 
 ### Local errors
 
@@ -196,7 +196,7 @@ Handled failures use the existing Node `{error:{code,message}}` envelope. Hardwa
 
 ## Supabase booking RPC client
 
-Source: [`bookings-api.ts`](../mobile/src/lib/bookings-api.ts), [`booking-contract.ts`](../mobile/src/lib/booking-contract.ts), [`directory-booking-contract.ts`](../mobile/src/lib/directory-booking-contract.ts), and the booking hooks. See [DATABASE.md](DATABASE.md) for SQL, locking, permissions, expiry and constraints, and [SUPABASE.md](SUPABASE.md) for pending hosted activation. The third migration adds directory-slot holds; it does not replace registered-bay holds.
+Source: [`bookings-api.ts`](../mobile/src/lib/bookings-api.ts), [`booking-contract.ts`](../mobile/src/lib/booking-contract.ts), [`directory-booking-contract.ts`](../mobile/src/lib/directory-booking-contract.ts), and the booking hooks. See [DATABASE.md](DATABASE.md) for SQL, locking, permissions, expiry and constraints, and [SUPABASE.md](SUPABASE.md) for hosted setup evidence. The third migration adds directory-slot holds; it does not replace registered-bay holds.
 
 These calls go directly from the phone through the Supabase SDK. They do not use local `/api/*`. Configuration requires a project origin and public publishable/legacy anon key; privileged server keys are rejected. The client restores a persisted native SecureStore session or calls `auth.signInAnonymously()`, obtaining an authenticated guest identity. A public anon key alone is not a signed-in guest. Web preview session storage is memory only. The first-launch driver profile is a separate local object and is not an authentication identity.
 
@@ -270,3 +270,57 @@ The client returns `{ stations, fetchedAt, hasMore }`. A normalised station cont
 | GoingElectric | 10 seconds; 4 Mi-character body check and Content-Length guard; 500 entries considered | Body is read before the text-size check; this is not a streaming memory cap. Directory retention is one hour in the app. |
 
 None of these timeout or freshness policies proves physical state. A future live cycle requires a verified booking-to-bay mapping, trusted plate events, occupancy interlocks, confirmed hardware movement, and agreed charging evidence before software holds can be presented as protected charging reservations.
+
+## Current booking options
+
+The fixed-fee Now/extension/calendar routes and projections are documented in [SCHEDULED-SESSIONS.md](SCHEDULED-SESSIONS.md). Hardware create and quote payloads include `bookingMode: now|scheduled` and an initial ten-minute arrival window. `POST /api/hardware/slots/extend` takes `slotId` and `requestId`, accepts either unused mode and adds ten minutes/€1 mock. Scheduled hardware protection starts ten minutes before arrival; `protectionDeadlineAt` is ten minutes after arrival plus extensions. A timely matching plate records `entryAuthorizedAt` and stops unused-hold expiry; sensor-confirmed arrival/departure remain separate. A full location yields a cancelled slot with `failureReason: LOCATION_FULL`, explicit mock refund state and advisory nearest-location alternatives.
+
+Public-directory RPCs `reserve_directory_booking`, `extend_directory_booking` and `list_directory_holds` implement software-only intervals. The latter separates current `holds` from owner-only future/current `myBookings`. Neither directory app holds nor their scheduled lead-in send hardware commands.
+
+## Private recognition-service handoff
+
+The primary worker reads native Ecurious `GET /api/v1/locks/:id/plate/latest`; it needs no external model or callback token. That documented response has no confidence score. The worker privately compares the fresh post-protection recognition and queues the existing guarded entry workflow. `POST .../whitelist` programs device auto-access and does not create OCR events; current backend-controlled entry keeps that auto-access disabled. See [native OCR and whitelist integration](MODEL-INTEGRATION.md).
+
+`POST /api/integrations/plate-recognition` optionally allows another trusted OCR service to submit a recognition event. Configure the backend-only `BAYREADY_VISION_TOKEN` (32–256 random URL-safe characters) and give it only to that service. Send it as `Authorization: Bearer <private-token>` over a private/trusted connection; production transport must use HTTPS. An app's Supabase JWT is not this credential. The Expo launcher strips this setting from the device environment. Existing command activation, explicit lock allowlist, operator mapping and interlock requirements still apply; this route is unavailable while hardware setup is disabled.
+
+The JSON body contains exactly these fields; the plate below is fictional:
+
+```json
+{
+  "lockId": "operator-assigned-lock-id",
+  "eventId": "40000000-0000-4000-8000-000000000099",
+  "observedAt": "2026-10-24T13:02:00.000Z",
+  "licensePlate": "M-DEMO-42",
+  "confidence": 0.96
+}
+```
+
+Generate a fresh UUID per recognition and retain it for retries. Replace the example timestamp with the real UTC capture time: events must be no older than fifteen seconds, not future-dated and strictly newer than confirmed protection. Clocks must be synchronized. Only explicitly assigned locks are accepted. No image, camera URL or extra fields are allowed. Confidence below **0.90** is accepted as a non-match; this cutoff is a prototype assumption, not a calibrated model or safety guarantee.
+
+Node normalizes the plate in memory, compares its keyed HMAC against an active booking and re-reads the assigned lock observation. The private database RPC checks the deadline, ownership, phase, telemetry and prior event authorization under locks. SQL stores the booking fingerprint and event digest; the raw recognition and image are not persisted, logged or returned. If accepted, the response is HTTP **202** with `{ "accepted": true, "matched": true, "entryRequested": true }`. This queues entry; the guarded worker separately dispatches and confirms lowering. HTTP 202 with `matched: false`, `entryRequested: false` and `reason: LOW_CONFIDENCE | NO_MATCHING_ACTIVE_BOOKING` requests no entry. Invalid credentials return 401; malformed bodies 400; stale events/deadline conflicts 409; disabled setup 503. Unknown write outcomes require a booking read; an event retry must reuse its UUID.
+
+This optional endpoint was verified with fictional events and mocked hardware. A separate model is not required for Ecurious's native OCR. Actual camera-to-lock enrollment, live event timing, camera accuracy, physical movement and electrical charging remain separate evidence.
+
+## Multi-car rehearsal routes
+
+`GET /api/simulation` returns the isolated lab snapshot: `mode: simulation`, revision, virtual time, fictional cars/locations/bays, booking owners, observed occupants/barrier, pending acknowledged command, bounded events, scenario definitions and result checks. `POST /api/simulation/actions` takes exactly the relevant fields for one action:
+
+| Action | Additional fields |
+| --- | --- |
+| `reset` | None |
+| `scenario` | `scenarioId`: `race`, `plate-check`, `no-show`, `extension`, `scheduled-window`, `blocked-fallback`, `full-refund` |
+| `advance` | Whole `minutes` from 1 to 180 |
+| `reserve` | `carId`, `bayId`, `bookingMode`; scheduled additionally needs `arrivalMinutesFromNow` |
+| `extend` | `carId`, `bookingId` |
+| `scan` | `carId`, `bayId`, numeric `confidence` from 0 to 1 |
+| `park`, `block` | `carId`, `bayId` |
+| `depart` | `carId` |
+| `observe`, `clear` | `bayId` |
+
+Cars are `car-a`/`car-b`/`car-c`; bays are `bay-1`/`bay-2`/`bay-3`. Inputs cannot contain an actual plate, image, lock ID, account ID or API key. Every response uses no-store. Invalid controls return 400, state/owner conflicts 409, unsupported methods 405. Mutations are synchronous in one bounded process-local world. They never touch the hardware adapter, hosted database, real payments or the original single-bay simulator. See [the walkthrough and verification boundary](MULTI-CAR-SIMULATION.md).
+
+## Privacy rights RPCs
+
+Migration ten adds no-argument authenticated RPCs. Each derives the owner from `auth.uid()`; the phone cannot supply another owner ID. `export_my_bayready_data` projects the caller's directory reservations/extensions, registered-bay reservations and hardware bookings/extensions, plus erasure-request state. Private fingerprints/event keys/credentials/captures are omitted. This is a product data export, not the complete operator response to every access request; Auth, local device data and provider-held data are separate sources.
+
+`request_my_data_erasure` inserts one idempotent private queue row. `get_my_privacy_request` returns the caller's request or null. The request includes ID, `status: pending_review`, original request/update times, whether active hardware allocations exist and a notice. It does not cancel reservations, delete Auth identities, erase data or change hardware state. Repeated calls preserve the original request. The table has RLS and no direct phone grants. Ecurious must review/fulfill requests, settle retention and publish the controller contact; see [PRIVACY.md](PRIVACY.md).

@@ -35,59 +35,60 @@ export default function SessionScreen() {
   const workflow = hardware.snapshot?.workflows.find(item => item.bay.id === (slot?.bayId ?? parameters.bayId));
   const observation = hardware.snapshot?.observations.find(item => item.id === workflow?.bay.lockId);
   const connector = workflow?.bay.connectors.find(item => item.id === slot?.connectorId);
+  const barrierOnly = connector?.type === 'BARRIER_TEST';
   const observationFresh = hardware.fresh && observation?.telemetryFresh && observation.lastSeenAt && now - Date.parse(observation.lastSeenAt) >= 0 && now - Date.parse(observation.lastSeenAt) <= 5_000;
   const showSimulator = !parameters.slotId && !parameters.bayId && (!slot || parameters.simulator === '1') && simulator.state?.reservation?.status === 'charging';
 
+  const [deviceDetailsOpen, setDeviceDetailsOpen] = useState(false);
+  const protectionAt = slot?.protectionStartsAt ?? slot?.startsAt ?? null;
+  const deadline = slot?.protectionDeadlineAt ?? slot?.endsAt ?? null;
+  const ended = !!slot && ['cancelled', 'completed', 'expired'].includes(slot.status);
+  const upcoming = !!slot && slot.activatedAt === null && !!protectionAt && Date.parse(protectionAt) > now;
+  const countdown = (value: string | null) => {
+    if (!value) return '—';
+    const seconds = Math.max(0, Math.ceil((Date.parse(value) - now) / 1_000));
+    return seconds > 0 ? Math.floor(seconds / 60) + ':' + String(seconds % 60).padStart(2, '0') : 'Checking status';
+  };
+  const status = !schedule.fresh ? 'Refresh status' : slot?.status === 'cancelled' ? 'Cancelled' : slot?.status === 'expired' ? 'Hold ended' : slot?.status === 'completed' || slot?.departedAt ? 'Completed' : slot?.status === 'cancel_requested' ? 'Releasing' : slot?.status === 'blocked' ? 'Bay needs attention' : upcoming ? 'Upcoming' : slot?.arrivedAt ? 'Vehicle arrived' : slot?.entryAuthorizedAt ? 'Entry authorized' : workflow?.phase === 'protected' ? 'Protection confirmed' : 'Preparing protection';
+
   return <SafeAreaView style={ui.safe}>
-    <View style={styles.header}><Link href={showSimulator ? '/reserve' : '/hardware'} asChild><Pressable accessibilityRole="button" style={styles.back}><Text style={styles.backText}>{showSimulator ? '‹ Simulator' : '‹ Hardware bookings'}</Text></Pressable></Link><Text style={styles.mode}>{showSimulator ? 'SIMULATED' : 'SESSION'}</Text></View>
+    <View style={styles.header}><Link href={showSimulator ? '/reserve' : '/hardware'} asChild><Pressable accessibilityRole="button" style={styles.back}><Text style={styles.backText}>{showSimulator ? '‹ Simulator' : '‹ Bookings'}</Text></Pressable></Link><Text style={styles.mode}>{showSimulator ? 'SIMULATED' : 'HARDWARE DEMO'}</Text></View>
     <ScrollView contentContainerStyle={ui.scroll}>
       <View style={ui.content}>
-        <View><Text style={ui.eyebrow}>YOUR TIME AT THE BAY</Text><Text style={styles.title}>Session details.</Text><Text style={ui.body}>Arrival, booking time and available device information. Charging telemetry is not connected.</Text></View>
+        <Text style={styles.title}>Your session.</Text>
         {schedule.loading && !showSimulator ? <ActivityIndicator color={palette.ink} /> : null}
         {schedule.error && !showSimulator ? <View style={[ui.notice, ui.errorNotice]}><Text style={ui.body}>{schedule.error}</Text></View> : null}
         {showSimulator ? <View style={ui.card}>
-          <Text style={ui.eyebrow}>SIMULATED SESSION</Text><Text style={ui.sectionTitle}>{simulator.state?.bay.label}</Text>
-          <Text style={ui.body}>Local charging rehearsal. No electricity is delivered and no shared database booking is changed.</Text>
-          <View style={styles.elapsed}><Text style={ui.small}>Elapsed from simulated charge start</Text><Text style={styles.clock}>{elapsed(simulator.state?.reservation?.startedAt ?? null, null, Math.max(now, Date.parse(simulator.state?.now ?? new Date(now).toISOString())))}</Text></View>
+          <Text style={ui.eyebrow}>SIMULATED</Text><Text style={ui.sectionTitle}>{simulator.state?.bay.label}</Text>
+          <View style={styles.elapsed}><Text style={ui.small}>Simulated charging duration</Text><Text style={styles.clock}>{elapsed(simulator.state?.reservation?.startedAt ?? null, null, Math.max(now, Date.parse(simulator.state?.now ?? new Date(now).toISOString())))}</Text></View>
           <Text style={ui.body}>Vehicle {simulator.state?.reservation?.maskedPlate}</Text>
-          <View style={styles.row}><Fact label="Bay" value={simulator.state?.bay.status ?? 'Unknown'} /><Fact label="Barrier" value={simulator.state?.bay.barrier ?? 'Unknown'} /></View>
-          <View style={styles.row}><Fact label="Live power" value="Not simulated" /><Fact label="Energy delivered" value="No measurement" /></View>
+          <Text style={ui.small}>No electricity delivered · no real payment</Text>
           {simulator.error ? <Text style={styles.error}>{simulator.error}</Text> : null}
-          <ActionButton label="Simulate vehicle departure" onPress={() => void simulator.act('depart')} disabled={simulator.busy || !!simulator.error || !simulator.state?.capabilities.canDepart} variant="secondary" />
-          <Link href="/reserve" asChild><Pressable accessibilityRole="button" style={ui.button}><Text style={ui.buttonText}>Back to simulator controls</Text></Pressable></Link>
+          <ActionButton label="Simulate departure" onPress={() => void simulator.act('depart')} disabled={simulator.busy || !!simulator.error || !simulator.state?.capabilities.canDepart} />
         </View> : slot ? <>
           <View style={ui.card}>
-            <Text style={ui.eyebrow}>DESIGNATED HARDWARE BOOKING</Text>
+            <Text style={styles.status}>{status}</Text>
             <Text style={ui.sectionTitle}>{workflow?.bay.label ?? 'Your booked bay'}</Text>
-            <Text style={ui.label}>{schedule.fresh ? slot.status.replaceAll('_', ' ') : 'Booking state unknown · last received details'}</Text>
-            <Text style={ui.body}>Vehicle {slot.maskedPlate ?? 'plate hidden'}</Text>
-            <Text style={ui.body}>{formatHardwareInstant(slot.startsAt)} → {formatHardwareInstant(slot.endsAt)} · Berlin</Text>
-            {slot.status === 'scheduled' ? <Text style={ui.small}>Awaiting physical activation. Advance protection is requested ten minutes before your booked arrival, subject to safe device observations.</Text> : null}
-            <View style={styles.elapsed}><Text style={ui.small}>Time since matched arrival</Text><Text style={styles.clock}>{elapsed(slot.arrivedAt, slot.departedAt, now)}</Text></View>
-            <Text style={ui.small}>Matched arrival: {slot.arrivedAt ? formatHardwareInstant(slot.arrivedAt) : 'Not confirmed'}</Text>
-            <Text style={ui.small}>Departure: {slot.departedAt ? formatHardwareInstant(slot.departedAt) : 'Not confirmed'}</Text>
-            <Text style={ui.small}>Activated: {slot.activatedAt ? formatHardwareInstant(slot.activatedAt) : 'Not activated'}</Text>
-            <HardwareBookingDetails slot={slot} policy={schedule.snapshot?.policy} fresh={schedule.fresh} busy={schedule.busy} extensionAllowed={hardware.fresh && !!workflow && !['blocked', 'uncertain'].includes(workflow.phase) && now < Date.parse(slot.endsAt)} extend={schedule.extend} />
-            <HardwareAlternatives alternatives={schedule.snapshot?.alternatives} />
-            {slot.canCancel && slot.id ? <ActionButton label="Request booking cancellation / release" onPress={() => void schedule.cancel(slot.id!)} disabled={!schedule.fresh || schedule.busy} variant="secondary" /> : null}
+            <Text style={ui.small}>{barrierOnly ? 'Barrier-only test · no charging' : connector ? connector.label + ' · ' + (connector.type === 'Typ2' ? 'Type 2' : connector.type) + ' · rated ' + connector.powerKw + ' kW' : 'Test target information unavailable'}</Text>
+            <View style={styles.elapsed}><Text style={ui.small}>{slot.arrivedAt ? slot.departedAt ? 'Session duration' : 'Time since confirmed arrival' : ended ? 'Reservation status' : slot.entryAuthorizedAt ? 'Entry authorized' : upcoming ? 'Protection starts in' : 'Hold time remaining'}</Text><Text style={styles.clock}>{slot.arrivedAt ? elapsed(slot.arrivedAt, slot.departedAt, now) : ended ? status : slot.entryAuthorizedAt ? 'Awaiting arrival' : countdown(upcoming ? protectionAt : deadline)}</Text></View>
+            <Text style={ui.body}>Arrival {formatHardwareInstant(slot.startsAt)}</Text>
+            <Text style={ui.small}>Vehicle {slot.maskedPlate ?? 'hidden'}</Text>
+            <HardwareBookingDetails slot={slot} policy={schedule.snapshot?.policy} fresh={schedule.fresh} busy={schedule.busy} extensionAllowed={hardware.fresh && workflow?.phase === 'protected' && !!deadline && now < Date.parse(deadline)} extend={schedule.extend} />
+            {slot.canCancel && slot.id ? <Pressable accessibilityRole="button" onPress={() => void schedule.cancel(slot.id!)} disabled={!schedule.fresh || schedule.busy} style={styles.cancel}><Text style={styles.backText}>Cancel reservation</Text></Pressable> : null}
           </View>
-          <View style={ui.card}>
-            <Text style={ui.sectionTitle}>Current bay observations</Text>
+          <HardwareAlternatives alternatives={schedule.snapshot?.alternatives} />
+          <Text style={ui.small}>{barrierOnly ? 'Barrier and vehicle-presence test · no electricity delivered · mock payment' : 'Mock payment · live power and energy data unavailable'}</Text>
+          <Pressable accessibilityRole="button" accessibilityState={{ expanded: deviceDetailsOpen }} onPress={() => setDeviceDetailsOpen(open => !open)} style={styles.cancel}><Text style={styles.backText}>{deviceDetailsOpen ? 'Hide device information −' : 'Device information +'}</Text></Pressable>
+          {deviceDetailsOpen ? <View style={ui.card}>
             <View style={styles.row}><Fact label="Barrier" value={observationFresh ? observation?.barrier ?? 'unknown' : 'unknown'} /><Fact label="Occupancy" value={observationFresh ? observation?.occupancy ?? 'unknown' : 'unknown'} /></View>
-            <Text style={ui.small}>Provider timestamp: {observation?.lastSeenAt ? formatHardwareInstant(observation.lastSeenAt) : 'Unavailable'}. These current readings are separate from a future booking.</Text>
-            {!observationFresh && observation ? <Text style={ui.small}>Last reported: barrier {observation.barrier}, occupancy {observation.lastReportedPresence}. Current state is unknown because the report is older than 5 seconds or unavailable.</Text> : null}
-            <Text style={ui.body}>Workflow: {hardware.fresh && workflow ? workflow.phase.replaceAll('_', ' ') : 'Unknown · refresh required'}</Text>
+            <Text style={ui.small}>Last report {observation?.lastSeenAt ? formatHardwareInstant(observation.lastSeenAt) : 'unavailable'}</Text>
+            {!observationFresh && observation ? <Text style={ui.small}>Last reported {observation.barrier} · {observation.lastReportedPresence}</Text> : null}
+            <Text style={ui.small}>Arrival {slot.arrivedAt ? formatHardwareInstant(slot.arrivedAt) : 'not confirmed'}</Text>
+            <Text style={ui.small}>Departure {slot.departedAt ? formatHardwareInstant(slot.departedAt) : 'not confirmed'}</Text>
             {hardware.error ? <Text style={styles.error}>{hardware.error}</Text> : null}
-          </View>
-          <View style={ui.card}>
-            <Text style={ui.sectionTitle}>Charging information</Text>
-            <Fact label="Connector" value={connector ? `${connector.label} · ${connector.type === 'Typ2' ? 'Type 2' : connector.type}` : 'Not available'} />
-            <Fact label="Connector rating" value={connector ? `${connector.powerKw} kW rated` : 'Not available'} />
-            <View style={styles.row}><Fact label="Live charging power" value="Unavailable" /><Fact label="Energy delivered" value="Unavailable" /></View>
-            <Text style={ui.small}>A plate match, open barrier or occupied bay does not prove charging. The connector rating is a catalog value, not a live power measurement.</Text>
-          </View>
-        </> : !schedule.loading ? <View style={ui.card}><Text style={ui.sectionTitle}>No session found</Text><Text style={ui.body}>Restore the current booking session and choose one of your hardware time slots, or start a simulated charge for a local rehearsal.</Text><Link href="/hardware" asChild><Pressable accessibilityRole="button" style={ui.button}><Text style={ui.buttonText}>Open hardware bookings</Text></Pressable></Link><Link href="/reserve" asChild><Pressable accessibilityRole="button" style={[ui.button, ui.secondaryButton]}><Text style={ui.buttonText}>Open simulator</Text></Pressable></Link></View> : null}
-        <ActionButton label={showSimulator ? simulator.refreshing ? 'Refreshing…' : 'Refresh simulated session' : schedule.refreshing || hardware.refreshing ? 'Refreshing…' : 'Refresh session information'} onPress={() => { if (showSimulator) void simulator.refresh(); else { void schedule.refresh(); void hardware.refresh(); } }} disabled={showSimulator ? simulator.busy || simulator.refreshing : schedule.busy || hardware.busy || schedule.refreshing || hardware.refreshing} variant="secondary" />
+          </View> : null}
+        </> : !schedule.loading ? <View style={ui.card}><Text style={ui.sectionTitle}>No active session</Text><Text style={ui.body}>Choose a booking or try the simulator.</Text><Link href="/hardware" asChild><Pressable accessibilityRole="button" style={ui.button}><Text style={ui.buttonText}>Hardware bookings</Text></Pressable></Link><Link href="/reserve" asChild><Pressable accessibilityRole="button" style={StyleSheet.flatten([ui.button, ui.secondaryButton])}><Text style={ui.buttonText}>Open simulator</Text></Pressable></Link></View> : null}
+        <ActionButton label={showSimulator ? 'Refresh simulation' : 'Refresh status'} onPress={() => { if (showSimulator) void simulator.refresh(); else { void schedule.refresh(); void hardware.refresh(); } }} disabled={showSimulator ? simulator.busy || simulator.refreshing : schedule.busy || hardware.busy || schedule.refreshing || hardware.refreshing} variant="secondary" />
       </View>
     </ScrollView>
   </SafeAreaView>;
@@ -95,6 +96,7 @@ export default function SessionScreen() {
 
 function Fact({ label, value }: { label: string; value: string }) { return <View style={styles.fact}><Text style={ui.small}>{label}</Text><Text style={styles.factValue}>{value}</Text></View>; }
 const styles = StyleSheet.create({
+  status: { color: palette.ink, backgroundColor: palette.soft, padding: 8, borderRadius: 8, fontSize: 12, fontWeight: '700', alignSelf: 'flex-start' }, cancel: { minHeight: 42, justifyContent: 'center', alignItems: 'center' },
   header: { minHeight: 62, paddingHorizontal: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 },
   back: { minHeight: 44, justifyContent: 'center' }, backText: { color: palette.ink, fontSize: 14, fontWeight: '700' }, mode: { color: palette.muted, fontSize: 10, fontWeight: '800', letterSpacing: 0.7 },
   title: { color: palette.ink, fontSize: 34, fontWeight: '800', letterSpacing: -1, marginBottom: 11 },

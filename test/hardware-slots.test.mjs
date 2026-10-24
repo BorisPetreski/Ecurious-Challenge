@@ -8,7 +8,7 @@ const CONNECTOR = '40000000-0000-4000-8000-000000000002';
 const REQUEST = '40000000-0000-4000-8000-000000000003';
 const SLOT = '40000000-0000-4000-8000-000000000004';
 const KEY = Buffer.alloc(32, 7).toString('base64');
-const WINDOW = { startsAt: '2026-10-24T12:00:00.000Z', endsAt: '2026-10-24T12:30:00.000Z' };
+const WINDOW = { startsAt: '2026-10-24T12:00:00.000Z', endsAt: '2026-10-24T12:10:00.000Z' };
 const body = { ...WINDOW, bayId: BAY, connectorId: CONNECTOR, requestId: REQUEST, licensePlate: 'M-DEMO-42' };
 
 function fixture(options = {}) {
@@ -27,8 +27,9 @@ function fixture(options = {}) {
       calls.push({ role: 'worker', name, args });
       if (name === 'list_hardware_slot_work') return {
         controls: [{ bayId: BAY, lockId: 'fictional-slot-lock' }],
-        slots: [{ ...slot, plateHash: hash }],
+        slots: [{ ...slot, lockId: 'fictional-slot-lock', plateHash: hash }],
       };
+      if (name === 'authorize_hardware_plate_entry') return { bay: { id: BAY }, phase: 'entry_pending' };
       return {};
     },
   };
@@ -50,14 +51,15 @@ function fixture(options = {}) {
 }
 
 test('quotes distinguish free ten-minute reservations from fixed-fee scheduled protection', () => {
-  assert.deepEqual(reservationQuote(WINDOW, NOW), { ...WINDOW, ...RESERVATION_POLICY, durationMinutes: 30,
-    bookingMode: 'scheduled', fixedFeeCents: 100, maxChargeCents: 100, protectionStartsAt: WINDOW.startsAt });
+  assert.deepEqual(reservationQuote(WINDOW, NOW), { ...WINDOW, ...RESERVATION_POLICY, durationMinutes: 10,
+    bookingMode: 'scheduled', fixedFeeCents: 100, maxChargeCents: 100, protectionStartsAt: WINDOW.startsAt, protectionDeadlineAt: '2026-10-24T12:10:00.000Z' });
   assert.equal(reservationQuote({ ...WINDOW, bookingMode: 'now', endsAt: '2026-10-24T12:10:00Z' }, NOW).fixedFeeCents, 0);
-  assert.equal(reservationQuote({ bookingMode: 'scheduled', startsAt: '2026-10-24T13:00:00Z', endsAt: '2026-10-24T13:30:00Z' }, NOW).protectionStartsAt, '2026-10-24T12:50:00.000Z');
+  assert.equal(reservationQuote({ bookingMode: 'scheduled', startsAt: '2026-10-24T13:00:00Z', endsAt: '2026-10-24T13:10:00Z' }, NOW).protectionStartsAt, '2026-10-24T12:50:00.000Z');
   for (const bad of [
     { ...WINDOW, startsAt: '2026-10-24' },
     { ...WINDOW, startsAt: '2026-10-24T11:58:59Z' },
     { ...WINDOW, endsAt: '2026-10-24T12:04:59Z' },
+    { ...WINDOW, endsAt: '2026-10-24T12:30:00Z' },
     { ...WINDOW, endsAt: '2026-10-24T14:00:01Z' },
     { startsAt: '2026-11-01T12:00:00Z', endsAt: '2026-11-01T12:30:00Z' },
   ]) assert.throws(() => reservationQuote(bad, NOW), { code: 'INVALID_SLOT' });
@@ -135,4 +137,42 @@ test('reservation fees are fixed mock charges with explicit refunds', async () =
   await service.extend('guest.jwt.signature', { slotId: SLOT, requestId: REQUEST });
   assert.deepEqual(calls.find(call => call.name === 'request_hardware_slot_extension').args,
     { p_slot_id: SLOT, p_request_id: REQUEST });
+});
+
+const VISION_TOKEN = 'fictional_vision_credential_1234567890';
+const visionEvent = (overrides = {}) => ({ lockId: 'fictional-slot-lock', eventId: REQUEST,
+  observedAt: new Date(NOW).toISOString(), licensePlate: 'M-DEMO-42', confidence: 0.95, ...overrides });
+
+test('the private vision handoff refuses missing credentials and stale or image-bearing events', async () => {
+  const { service, calls } = fixture({ visionToken: VISION_TOKEN });
+  await service.reserve('guest.jwt.signature', body);
+  for (const token of [undefined, 'Bearer guest.jwt.signature', `Bearer ${'ü'.repeat(VISION_TOKEN.length)}`]) {
+    await assert.rejects(service.recognize(token, visionEvent()), { code: 'VISION_AUTH_REQUIRED' });
+  }
+  for (const invalidEvent of [visionEvent({ image: 'fictional-image' }), visionEvent({ lockId: 'foreign-lock' })]) {
+    await assert.rejects(service.recognize(`Bearer ${VISION_TOKEN}`, invalidEvent), { code: 'INVALID_PLATE_EVENT' });
+  }
+  await assert.rejects(service.recognize(`Bearer ${VISION_TOKEN}`, visionEvent({ observedAt: new Date(NOW - 16_000).toISOString() })), { code: 'PLATE_EVENT_INVALID' });
+  assert.equal(calls.some(call => call.name === 'authorize_hardware_plate_entry'), false);
+});
+
+test('a private matching vision event queues guarded entry without retaining its raw plate', async () => {
+  const { service, calls } = fixture({ visionToken: VISION_TOKEN });
+  await service.reserve('guest.jwt.signature', body);
+  const response = await service.recognize(`Bearer ${VISION_TOKEN}`, visionEvent());
+  assert.deepEqual(response, { accepted: true, matched: true, entryRequested: true });
+  const authorized = calls.find(call => call.name === 'authorize_hardware_plate_entry');
+  assert.equal(authorized.role, 'worker');
+  assert.equal(authorized.args.p_slot_id, SLOT);
+  assert.match(authorized.args.p_event_key, /^[0-9a-f]{64}$/);
+  assert.equal(JSON.stringify(calls).includes('M-DEMO-42'), false);
+  assert.equal(JSON.stringify(response).includes('42'), false);
+});
+
+test('a low-confidence or different plate leaves the booking and deadline unchanged', async () => {
+  const { service, calls } = fixture({ visionToken: VISION_TOKEN });
+  await service.reserve('guest.jwt.signature', body);
+  assert.equal((await service.recognize(`Bearer ${VISION_TOKEN}`, visionEvent({ confidence: 0.4 }))).matched, false);
+  assert.equal((await service.recognize(`Bearer ${VISION_TOKEN}`, visionEvent({ licensePlate: 'M-DEMO-99' }))).matched, false);
+  assert.equal(calls.some(call => call.name === 'authorize_hardware_plate_entry'), false);
 });

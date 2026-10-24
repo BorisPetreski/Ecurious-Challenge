@@ -62,4 +62,14 @@ If Expo loads but the app cannot reach the simulator, confirm both processes are
 
 If Expo Go reports a version mismatch, install the matching SDK 58 Expo Go release from [Expo's download page](https://expo.dev/go). No Android Studio or native build is required for this starter.
 
-The designated screen separates durable booking state, command acknowledgement and current sensor observations. Owner entry is manual, not plate verification. Unknown command delivery requires operator recovery; an elapsed countdown does not release its physical guard. See [blocked bays and no-shows](../docs/BAY-LIFECYCLE.md).
+The designated screen separates durable booking state, command acknowledgement and current sensor observations. New hardware bookings require a fresh trusted plate match for entry; the older manual flow remains a compatibility prototype. Unknown command delivery requires operator recovery; an elapsed countdown does not release its physical guard. See [blocked bays and no-shows](../docs/BAY-LIFECYCLE.md).
+
+## Current booking and account flow
+
+The map has separate **Reserve**, **Bookings** and **Filters** controls. Reserve offers Now/free ten minutes or Schedule with native calendar/time dialogs and a €1 mock fee. Bookings groups your active and upcoming holds, with cancellation and Add ten minutes/€1 mock. A 15:00 scheduled arrival starts protection at 14:50 and has a 15:10 unused-hold deadline; earlier non-overlapping bookings remain possible before protection. Public directory slots stay software-only.
+
+Open **Profile → Multi-car Scenario lab** to run seven fictional cases or switch Car A/B/C manually. The lab is isolated from your real bookings and the hardware adapter; a virtual clock makes the 14:50/15:10 transitions immediate to demonstrate. See [the lab guide](../docs/MULTI-CAR-SIMULATION.md).
+
+**Profile → Privacy & data** provides local-profile export/deletion and separate account booking export/erasure-request controls. Clearing the phone profile does not delete cloud or camera-provider data. A cloud erasure request is pending operator review, not an automatic deletion. Ecurious is the intended operator; [privacy readiness](../docs/PRIVACY.md) records the remaining notice, retention and fulfillment requirements.
+
+Hardware booking provides the enrolled-device path, same-location fallback/refunds and nearby confirmed alternatives. A timely trusted plate match ends its unused-hold timer; fresh occupied/vacant sensor reports establish arrival/departure separately. Profile links to guest/email sign-in. View session focuses on duration, status and available facts; device details are collapsed and real charging telemetry remains unavailable. See [the shared design](../docs/SCHEDULED-SESSIONS.md), [private YOLO/OCR handoff](../docs/API.md#private-recognition-service-handoff) and [hosted setup evidence](../docs/SUPABASE.md).

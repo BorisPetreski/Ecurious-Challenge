@@ -8,8 +8,8 @@ export const PROJECT_REF = 'omxqhwrfnyodmscmjfqm';
 export const PROJECT_ORIGIN = `https://${PROJECT_REF}.supabase.co`;
 const MANAGEMENT_ORIGIN = 'https://api.supabase.com';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const VERSIONS = ['20261024120000', '20261024130000', '20261024140000', '20261024150000', '20261024160000', '20261024170000'];
-const APP_TABLES = ['charging_locations', 'bookable_bays', 'bay_connectors', 'booking_reservations', 'directory_plug_reservations', 'hardware_controls', 'hardware_operations', 'hardware_slot_bookings', 'hardware_slot_extensions'];
+const VERSIONS = ['20261024120000', '20261024130000', '20261024140000', '20261024150000', '20261024160000', '20261024170000', '20261024180000', '20261024190000', '20261024200000', '20261024210000', '20261024220000', '20261024230000'];
+const APP_TABLES = ['charging_locations', 'bookable_bays', 'bay_connectors', 'booking_reservations', 'directory_plug_reservations', 'directory_plug_extensions', 'hardware_controls', 'hardware_operations', 'hardware_slot_bookings', 'hardware_slot_extensions', 'privacy_erasure_requests'];
 const sha256 = value => createHash('sha256').update(value).digest('hex');
 const literal = value => `'${String(value).replaceAll("'", "''")}'`;
 const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -133,7 +133,7 @@ export async function inspectSetup(client, migrations) {
 }
 
 export function buildSetupTransaction(migrations, inspection) {
-  if (migrations.length !== VERSIONS.length) throw new SetupError('All six reviewed migrations must be present before hosted apply.');
+  if (migrations.length !== VERSIONS.length) throw new SetupError('All twelve reviewed migrations must be present before hosted apply.');
   const pending = migrations.slice(inspection.migrationVersions.length);
   const expectedVersions = literal(JSON.stringify(inspection.migrationVersions));
   const appNames = APP_TABLES.map(literal).join(',');
@@ -235,7 +235,7 @@ export async function verifyHostedGuest(env, fetchImpl) {
     const directory = await request('/rest/v1/rpc/list_directory_holds', { token, body: { p_station_ids: [] } });
     const hardware = await request('/rest/v1/rpc/list_hardware_workflows', { token, body: {} });
     const calendar = await request('/rest/v1/rpc/list_my_hardware_slots', { token, body: {} });
-    if (!record(registered) || !Array.isArray(registered.bays) || !record(directory) || !Array.isArray(directory.holds) ||
+    if (!record(registered) || !Array.isArray(registered.bays) || !record(directory) || !Array.isArray(directory.holds) || !Array.isArray(directory.myBookings) ||
       !record(hardware) || !Array.isArray(hardware.workflows) || !record(calendar) || !Array.isArray(calendar.slots)) {
       throw new SetupError('Authenticated guest RPC responses were not verified.');
     }
@@ -248,6 +248,8 @@ export async function verifyHostedGuest(env, fetchImpl) {
     for (const [path, method, body] of [
       ['/rest/v1/hardware_controls?select=bay_id&limit=1', 'GET', undefined],
       ['/rest/v1/hardware_operations?select=id&limit=1', 'GET', undefined],
+      ['/rest/v1/hardware_slot_extensions?select=request_id&limit=1', 'GET', undefined],
+      ['/rest/v1/directory_plug_extensions?select=request_id&limit=1', 'GET', undefined],
       ['/rest/v1/rpc/list_hardware_slot_work', 'POST', { p_limit: 1 }],
     ]) {
       const denied = await fetchImpl(`${PROJECT_ORIGIN}${path}`, {

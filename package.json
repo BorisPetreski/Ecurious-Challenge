@@ -21,6 +21,7 @@
     "mobile:check": "npm --prefix mobile run typecheck",
     "mobile:doctor": "npm --prefix mobile run doctor",
     "hardware:inspect": "node --env-file-if-exists=.env scripts/inspect-hardware.mjs",
+    "hardware:enroll-test": "node --env-file-if-exists=.env scripts/enroll-hardware-test.mjs",
     "doctor": "node --env-file-if-exists=.env scripts/doctor.mjs",
     "supabase:setup": "node --env-file-if-exists=.env scripts/setup-supabase.mjs"
   }

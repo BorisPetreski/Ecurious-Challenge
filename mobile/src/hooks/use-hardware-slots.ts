@@ -62,7 +62,7 @@ export function useHardwareSlots(bayId?: string) {
     return mutate(() => cancelHardwareSlot(slotId));
   }, [mutate]);
   const extend = useCallback((slotId: string) => {
-    if (!snapshotRef.current?.slots.some(slot => slot.id === slotId && slot.isMine && slot.bookingMode === 'now' && ['scheduled', 'active'].includes(slot.status))) { setError('Only your current Reserve now booking can be extended. Refresh its status.'); return Promise.resolve(false); }
+    if (!snapshotRef.current?.slots.some(slot => slot.id === slotId && slot.isMine && (slot.bookingMode === 'now' || slot.bookingMode === 'scheduled') && slot.activatedAt !== null && !slot.entryAuthorizedAt && !slot.arrivedAt && ['scheduled', 'active'].includes(slot.status))) { setError('Only an active hold before plate-matched entry can be extended. Refresh its status.'); return Promise.resolve(false); }
     return mutate(() => extendHardwareSlot(slotId));
   }, [mutate]);
 

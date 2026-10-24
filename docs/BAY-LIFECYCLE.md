@@ -2,7 +2,7 @@
 
 The `/hardware` mobile screen is separate from directory app-slot holds, fictional registered inventory and the `/reserve` simulator. It uses the authenticated Node workflow routes and the backend's designated lock allowlist. Hardware credentials and the private database worker key remain on the backend.
 
-The mobile client and the guarded workflow implementation are prepared locally. Hosted schema activation, operator enrollment/interlock confirmation and a recorded physical cycle remain deployment/verification work. A command acknowledgement does not establish completed movement, recognized arrival or charging. See [ECURIOUS-API.md](ECURIOUS-API.md), [SYSTEM-DESIGN.md](SYSTEM-DESIGN.md) and [DATABASE.md](DATABASE.md).
+The mobile client and the guarded workflow implementation are prepared, and hosted schema/Auth are configured. Barrier-only `lock-0002` is enrolled; the user relayed operator interlock/OCR confirmations and exclusive team use. Direct API raise/lower and worker cleanup have newer matching device reports. A genuinely fresh vacant/lowered report restored activation at **14:22:21.966 UTC** after a telemetry pause. The complete customer plate/occupancy/departure cycle remains unverified. A booking intent or command acknowledgement alone does not establish completed movement, recognized arrival or charging. See [the app walkthrough](LOCK-0002-WALKTHROUGH.md), [ECURIOUS-API.md](ECURIOUS-API.md), [SYSTEM-DESIGN.md](SYSTEM-DESIGN.md) and [DATABASE.md](DATABASE.md).
 
 ## Implemented mobile behavior
 
@@ -12,7 +12,7 @@ Activity's read-only hardware panel links to the designated-bay screen. That scr
 - Barrier/occupancy observations and their provider timestamp. Old or missing observations display unknown.
 - The backend workflow phase and command status. An acknowledged command stays awaiting hardware observation; an uncertain outcome stays unknown.
 
-The preferred profile connector filters enabled choices. A new time slot requires a complete local profile, selected connector, explicit start/end and a matching server mock quote before confirmation. Windows last 5–120 minutes and start within seven days. The form uses Berlin times with explicit daylight-saving offsets. See [scheduled sessions and account flow](SCHEDULED-SESSIONS.md).
+The preferred profile connector filters enabled choices. A new time slot requires a complete local profile, selected connector, arrival time and a matching server mock quote before confirmation. Initial arrival windows last ten minutes and start within seven days; paid ten-minute additions extend an unused hold. The form uses Berlin times with explicit daylight-saving offsets. See [scheduled sessions and account flow](SCHEDULED-SESSIONS.md).
 
 The final hardware booking sends its resource/window/request ID and plate to the backend. Only a keyed fingerprint and masked suffix reach SQL; contacts and mock payment stay on the phone. Once protection is confirmed, a fresh matching recognition can queue guarded entry. A later fresh occupied sample after authorized entry records arrival; a newer vacant sample records departure and requests cleanup. The old immediate/manual path remains a compatibility prototype and cannot open a plate-bound scheduled booking manually.
 
@@ -45,7 +45,7 @@ The prepared backend preflight checks occupancy, fresh telemetry, faults and the
 
 The reservation owner and original context stay visible during recovery. Release requests still depend on backend capabilities and reconciliation. A blocked bay must not become available merely because the owner cancelled, the phone disconnected or its countdown elapsed.
 
-Idle enrolled bays are monitored too: occupied means blocked, and a newer vacant observation can restore an open idle bay or queue checked lowering. Scheduled activation refuses occupied/uncertain bays and waives mock fees. Operator escalation, alternate verified bay suggestions, real compensation and automatic rerouting remain product proposals.
+Idle enrolled bays are monitored too: occupied means blocked, and a newer vacant observation can restore an open idle bay or queue checked lowering. Scheduled activation tries another compatible confirmed-vacant bay at the location before cancelling/refunding mock fees and suggesting registered alternatives. Operator escalation and real compensation remain product proposals.
 
 ## No-shows and deadlines
 
@@ -53,7 +53,7 @@ The UI counts down using backend time. At zero it displays **Deadline reached ·
 
 The prepared server/worker owns deadline reconciliation. Safe cancellation/no-show handling requires a consistent reservation phase, fresh occupancy and confirmed physical cleanup. Occupied, stale or uncertain physical state retains a recovery guard instead of creating another bookable allocation. A missing recognition event is never sufficient evidence of no-show or vacancy.
 
-The scheduled no-show deadline is the earlier of the booked end and 15 minutes after actual protection confirmation, until trusted arrival is recorded. At the deadline the worker requests cleanup; occupied or uncertain state continues to hold the guard. A matching plate stops the estimated mock empty-bay fee; trusted occupied evidence records the session arrival. Pricing assumptions and public benchmarks are in [SCHEDULED-SESSIONS.md](SCHEDULED-SESSIONS.md).
+Unused Now bookings expire ten minutes from creation; scheduled protection runs from ten minutes before arrival until ten minutes after it. Accepted €1 mock extensions add ten minutes to either mode. Thus a 15:00 booking starts protection at 14:50 and requests unused-hold cleanup at 15:10. Before 14:50 it remains available for earlier non-overlapping bookings. A timely matching plate sets `entryAuthorizedAt` and exits both unused-hold timers; an occupied sensor sample still records arrival separately. Occupied or uncertain physical state retains its guard. Before physical activation, an occupied requested bay can be replaced atomically by a compatible bay at the same location; a full location cancels/refunds the mock fee and offers nearby verified alternatives. See [SCHEDULED-SESSIONS.md](SCHEDULED-SESSIONS.md) for both booking options and the connector/bay distinction.
 
 No real payment is implemented. A lowered barrier or occupied sensor alone cannot establish charging or authorized arrival, and a missed camera event never establishes departure or vacancy. Actual charging evidence, reminders and a supervised full physical cycle remain outstanding.
 

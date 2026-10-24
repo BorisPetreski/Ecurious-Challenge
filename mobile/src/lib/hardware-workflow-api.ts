@@ -12,6 +12,8 @@ export interface HardwareWorkflow {
   reservation: { id: string | null; isMine: boolean; expiresAt: string | null };
   phase: HardwarePhase;
   reason: string | null;
+  controlsEnabled?: boolean;
+  interlocksConfirmed?: boolean;
   operation: {
     id: string;
     kind: 'protect' | 'entry' | 'release';
@@ -46,7 +48,8 @@ const nullableTime = (value: unknown): boolean => value === null || timestamp(va
 const finiteOrNull = (value: unknown): boolean => value === null || (typeof value === 'number' && Number.isFinite(value));
 
 function connector(value: unknown): value is BayConnector {
-  return record(value) && uuid(value.id) && typeof value.label === 'string' && typeof value.type === 'string' && typeof value.powerKw === 'number' && Number.isFinite(value.powerKw) && value.powerKw >= 0 && typeof value.enabled === 'boolean';
+  return record(value) && uuid(value.id) && typeof value.label === 'string' && typeof value.type === 'string' && typeof value.powerKw === 'number' && Number.isFinite(value.powerKw) && typeof value.enabled === 'boolean' &&
+    (value.type === 'BARRIER_TEST' ? value.powerKw === 0 : value.powerKw > 0 && value.powerKw <= 2_000);
 }
 
 function workflow(value: unknown): value is HardwareWorkflow {
@@ -56,6 +59,8 @@ function workflow(value: unknown): value is HardwareWorkflow {
     (reservation.id === null || uuid(reservation.id)) && typeof reservation.isMine === 'boolean' && nullableTime(reservation.expiresAt) &&
     (!reservation.isMine || uuid(reservation.id)) && (reservation.isMine || reservation.id === null) &&
     phases.includes(value.phase as HardwarePhase) && nullableText(value.reason) &&
+    (value.controlsEnabled === undefined || typeof value.controlsEnabled === 'boolean') &&
+    (value.interlocksConfirmed === undefined || typeof value.interlocksConfirmed === 'boolean') &&
     ['canReserve', 'canRequestEntry', 'canRequestRelease'].every(key => typeof capabilities[key] === 'boolean') &&
     (operation === null || (record(operation) && uuid(operation.id) && ['protect', 'entry', 'release'].includes(operation.kind as string) && ['raised', 'lowered'].includes(operation.target as string) && operationStates.includes(operation.status as string) && timestamp(operation.requestedAt) && nullableTime(operation.dispatchedAt)));
   if (!valid) return false;

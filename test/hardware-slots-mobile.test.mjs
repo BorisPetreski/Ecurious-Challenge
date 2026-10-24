@@ -10,9 +10,9 @@ const fixtureKey = '__bayReadySlotMobileFixtures';
 globalThis[fixtureKey] = new Map();
 let nextId = 0;
 const bayId = '11111111-1111-4111-8111-111111111111', connectorId = '22222222-2222-4222-8222-222222222222', slotId = '33333333-3333-4333-8333-333333333333', requestId = '44444444-4444-4444-8444-444444444444';
-const startsAt = '2026-10-24T13:00:00.000Z', endsAt = '2026-10-24T13:30:00.000Z';
+const startsAt = '2026-10-24T13:00:00.000Z', endsAt = '2026-10-24T13:10:00.000Z';
 const policy = { currency: 'EUR', mock: true, nowFreeMinutes: 10, extensionMinutes: 10, extensionFeeCents: 100, scheduledFeeCents: 100, protectionLeadMinutes: 10 };
-const quote = () => ({ ...policy, startsAt, endsAt, durationMinutes: 30, bookingMode: 'scheduled', fixedFeeCents: 100, maxChargeCents: 100 });
+const quote = () => ({ ...policy, startsAt, endsAt, durationMinutes: 10, bookingMode: 'scheduled', fixedFeeCents: 100, maxChargeCents: 100 });
 const ownSlot = () => ({ id: slotId, bayId, connectorId, startsAt, endsAt, status: 'scheduled', isMine: true, canCancel: true, maskedPlate: '•••42', arrivedAt: null, departedAt: null, activatedAt: null, mockFeeCents: 0 });
 const snapshot = (slots = [ownSlot()]) => ({ serverNow: '2026-10-24T12:00:00.000Z', configured: true, slots, policy });
 

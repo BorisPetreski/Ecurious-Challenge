@@ -40,9 +40,11 @@ function AppRoutes() {
         <Stack.Screen name="activity" />
         <Stack.Screen name="hardware" />
         <Stack.Screen name="session" />
+        <Stack.Screen name="simulation" />
         </Stack.Protected>
         <Stack.Screen name="profile" />
         <Stack.Screen name="sign-in" />
+        <Stack.Screen name="privacy" />
       </Stack>
       </BookingsProvider>
     </ReservationProvider>

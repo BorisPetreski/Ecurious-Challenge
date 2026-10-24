@@ -18,6 +18,8 @@ export interface HardwareSlot {
   arrivedAt: string | null;
   departedAt: string | null;
   activatedAt: string | null;
+  entryAuthorizedAt?: string | null;
+  protectionDeadlineAt?: string | null;
   mockFeeCents: number | null;
   bookingMode?: HardwareBookingMode;
   reservationFeeCents?: number | null;
@@ -32,7 +34,7 @@ export interface HardwareSlot {
 export interface HardwareFeePolicy { currency: 'EUR'; mock: true; nowFreeMinutes?: number; extensionMinutes?: number; extensionFeeCents?: number; scheduledFeeCents?: number; protectionLeadMinutes?: number; freeMinutes?: number; rateCentsPerMinute?: number; capCents?: number; arrivalGraceMinutes?: number }
 export interface HardwareAlternative { locationId: string; label: string; latitude: number | null; longitude: number | null; distanceKm: number | null; availableBays: number; connectorTypes: string[] }
 export interface HardwareSlotSnapshot { serverNow: string; slots: HardwareSlot[]; policy: HardwareFeePolicy; alternatives?: HardwareAlternative[]; configured?: boolean; commandsEnabled?: boolean }
-export interface HardwareQuote extends HardwareFeePolicy { startsAt: string; endsAt: string; durationMinutes: number; bookingMode: HardwareBookingMode; fixedFeeCents: number; maxChargeCents: number }
+export interface HardwareQuote extends HardwareFeePolicy { startsAt: string; endsAt: string; durationMinutes: number; bookingMode: HardwareBookingMode; fixedFeeCents: number; maxChargeCents: number; protectionDeadlineAt?: string }
 export interface HardwareSlotInput { bayId: string; connectorId: string; startsAt: string; endsAt: string; licensePlate: string; bookingMode: HardwareBookingMode }
 
 export class HardwareSlotsError extends Error {}
@@ -59,6 +61,8 @@ export function isHardwareSlotSnapshot(value: unknown): value is HardwareSlotSna
       !statuses.includes(slot.status as HardwareSlotStatus) || typeof slot.isMine !== 'boolean' || typeof slot.canCancel !== 'boolean' || (slot.id !== null && !uuid(slot.id)) ||
       (slot.maskedPlate !== null && (typeof slot.maskedPlate !== 'string' || slot.maskedPlate.length > 50)) || !optionalTime(slot.arrivedAt) || !optionalTime(slot.departedAt) || !optionalTime(slot.activatedAt) ||
       (slot.mockFeeCents !== null && !nonnegative(slot.mockFeeCents)) ||
+      (slot.entryAuthorizedAt !== undefined && !optionalTime(slot.entryAuthorizedAt)) ||
+      (slot.protectionDeadlineAt !== undefined && !optionalTime(slot.protectionDeadlineAt)) ||
       (slot.bookingMode !== undefined && !['now', 'scheduled'].includes(slot.bookingMode as string)) ||
       (slot.reservationFeeCents !== undefined && slot.reservationFeeCents !== null && !nonnegative(slot.reservationFeeCents)) ||
       (slot.paymentStatus !== undefined && slot.paymentStatus !== null && !['free', 'mock_free', 'mock_paid', 'mock_refunded'].includes(slot.paymentStatus as string)) ||
@@ -69,7 +73,7 @@ export function isHardwareSlotSnapshot(value: unknown): value is HardwareSlotSna
       (slot.failureReason !== undefined && slot.failureReason !== null && (typeof slot.failureReason !== 'string' || slot.failureReason.length > 500)) ||
       (slot.fallbackReason !== undefined && slot.fallbackReason !== null && (typeof slot.fallbackReason !== 'string' || slot.fallbackReason.length > 500))) return false;
     if (slot.isMine) { if (!uuid(slot.id) || ids.has(slot.id)) return false; ids.add(slot.id); }
-    else if (slot.id !== null || slot.canCancel || slot.maskedPlate !== null || slot.arrivedAt !== null || slot.departedAt !== null || slot.activatedAt !== null || slot.mockFeeCents !== null || ['reservationFeeCents', 'paymentStatus', 'requestedBayId', 'requestedConnectorId', 'extensionCount', 'failureReason', 'fallbackReason'].some(key => slot[key] !== undefined && slot[key] !== null)) return false;
+    else if (slot.id !== null || slot.canCancel || slot.maskedPlate !== null || slot.arrivedAt !== null || slot.departedAt !== null || slot.activatedAt !== null || slot.mockFeeCents !== null || ['entryAuthorizedAt', 'reservationFeeCents', 'paymentStatus', 'requestedBayId', 'requestedConnectorId', 'extensionCount', 'failureReason', 'fallbackReason'].some(key => slot[key] !== undefined && slot[key] !== null)) return false;
     if (slot.canCancel && ['cancel_requested', 'cancelled', 'completed', 'expired'].includes(slot.status as string)) return false;
     return true;
   });
@@ -77,7 +81,7 @@ export function isHardwareSlotSnapshot(value: unknown): value is HardwareSlotSna
 
 export function isHardwareQuote(value: unknown): value is HardwareQuote {
   return policy(value) && record(value) && timestamp(value.startsAt) && timestamp(value.endsAt) && Date.parse(value.endsAt) > Date.parse(value.startsAt) &&
-    typeof value.durationMinutes === 'number' && Number.isFinite(value.durationMinutes) && value.durationMinutes > 0 && ['now', 'scheduled'].includes(value.bookingMode as string) && nonnegative(value.fixedFeeCents) && nonnegative(value.maxChargeCents) && value.fixedFeeCents === value.maxChargeCents;
+    typeof value.durationMinutes === 'number' && Number.isFinite(value.durationMinutes) && value.durationMinutes > 0 && ['now', 'scheduled'].includes(value.bookingMode as string) && nonnegative(value.fixedFeeCents) && nonnegative(value.maxChargeCents) && value.fixedFeeCents === value.maxChargeCents && (value.protectionDeadlineAt === undefined || timestamp(value.protectionDeadlineAt));
 }
 
 const messages: Record<string, string> = {
@@ -85,8 +89,8 @@ const messages: Record<string, string> = {
   SLOT_OVERLAP: 'This bay already has an overlapping booking. Choose another time.',
   SLOT_CONFLICT: 'This bay already has an overlapping booking. Choose another time.',
   SLOT_RESERVED: 'This bay already has an overlapping booking. Choose another time.',
-  INVALID_SLOT: 'Choose a valid 5–120 minute window within the next 7 days.',
-  INVALID_WINDOW: 'Choose a valid 5–120 minute window within the next 7 days.',
+  INVALID_SLOT: 'Choose a ten-minute arrival window within the next 7 days.',
+  INVALID_WINDOW: 'Choose a ten-minute arrival window within the next 7 days.',
   INVALID_PLATE: 'Check the vehicle plate in your saved profile.',
   HARDWARE_SETUP_REQUIRED: 'The designated hardware booking service is not configured yet.',
   SLOT_NOT_FOUND: 'This booking no longer belongs to your session. Refresh its status.',

@@ -1,8 +1,24 @@
 # BayReady setup and operations
 
-BayReady currently runs as an Expo mobile app with several independent connections: direct GoingElectric discovery, prepared Supabase software holds for listed app plugs and registered bays, a laptop simulator, read-only Ecurious diagnostics, and a guarded designated-bay worker through that laptop. The Supabase schema and client are implemented, but the hosted migrations and anonymous-auth activation remain pending administrator access. Hardware movement is implemented behind default-disabled controls; scheduled camera-matched arrival/departure and a session screen are implemented; electrical charging telemetry remains unavailable. No physical commands or full live cycle have been verified.
+BayReady runs as an Expo mobile app with direct GoingElectric discovery, Supabase software holds, a separate laptop simulator, read-only Ecurious diagnostics and a guarded designated-bay worker. Hosted schema/Auth are configured. The current test deployment enables only `lock-0002`, enrolled as a **barrier-only interface at 0 kW**, with no charger or GoingElectric mapping. Direct raise/lower movements and a worker idle cleanup have been confirmed through newer provider observations. The booking → matching plate → occupied arrival → departure cycle remains unverified; electrical charging telemetry is unavailable.
 
 This guide describes the code and evidence recorded on 24 October 2026. Use [the integration guide](INTEGRATION.md), [Supabase contract](SUPABASE.md), [Ecurious observations](ECURIOUS-API.md) and [build log](BUILD-LOG.md) for their respective boundaries.
+
+## Current hardware checkpoint
+
+The active development processes use API port **3001** and Metro **8081**. Code defaults remain disabled for a new deployment; the current operator-configured backend has commands enabled and an allowlist containing only `lock-0002`, with both database control/interlock gates enabled.
+
+| Evidence on 24 October 2026, UTC | Observed result |
+| --- | --- |
+| Direct bench raise, `13:54:55.309Z` | Acknowledgement followed by a strictly newer raised/vacant observation. |
+| Direct bench lower, `13:54:59.709Z` | Acknowledgement followed by a strictly newer lowered/vacant observation. These bench calls were outside the application operation ledger. |
+| Camera policy, `13:55:56.915Z` | Acknowledged clear request followed by reported disabled policy/count zero. This is not independent EEPROM verification. |
+| Worker idle cleanup, `14:01:45Z` | Lowering/idle cleanup confirmed; no plate-bound booking or occupied arrival was established. |
+| Fresh sample, `14:22:21.966Z` | The operator re-enabled the database control in phase `idle`; interlocks remained confirmed. Later sample ageing returned `blocked` / `TELEMETRY_UNKNOWN` while the enable flag stayed true. |
+
+Provider samples at `14:19:21.962Z` and `14:22:21.966Z` were about three minutes apart. Polling every five seconds does not make retained sensor data new. The movement preflight still requires a sample within **five seconds**; an enabled control can therefore spend most of this observed interval waiting on telemetry. An old vacant report is never current vacancy.
+
+The next additive telemetry-waiting update is in progress at this checkpoint. Its intended behavior is to store eligible Now/Scheduled intent while physical state is unknown, show protection pending, and wait for a fresh safe sample within the original deadline. Unknown telemetry must not become a `LOCATION_FULL` claim. Occupied, faulty, uncertain or already-owned resources remain blocked, and the five-second movement guard is unchanged. Check [the build log](BUILD-LOG.md) for deployment confirmation before relying on that update.
 
 ## Requirements and first checkout
 
@@ -30,7 +46,7 @@ Only variable names are listed here; no credentials are reproduced.
 | `ECURIOUS_MODE` | Node backend / root `.env` | Simulator mode. Only mock mode is accepted; choosing live mode refuses startup. |
 | `PORT` | Node backend and combined launcher / root `.env` or shell | Local API port. The combined launcher passes it to the phone client. |
 | `HOST` | Standalone backend / root `.env` or shell | Network bind address. Combined mobile startup and `server:lan` explicitly select the LAN bind address. |
-| `ECURIOUS_API_KEY` | Backend adapter / root `.env` | Private hardware credential for read-only upstream requests. The root launchers remove this named variable from the Expo child environment. |
+| `ECURIOUS_API_KEY` | Backend adapter / root `.env` | Private hardware credential for projected reads and explicitly gated commands. Removed from the Expo child environment. |
 | `ECURIOUS_BASE_URL` | Backend adapter / root `.env` | Optional HTTPS origin for the challenge service. Paths, URL credentials and query parameters are not accepted. |
 | `ECURIOUS_COMMANDS_ENABLED` | Backend only / root `.env` | Exact `true` or `false`; defaults false. Explicit activation does not replace enrolled interlock/mapping checks. |
 | `ECURIOUS_LOCK_IDS` | Backend only / root `.env` | Comma-separated confirmed assigned lock IDs; at most 20. Never inferred from directory locations. |
@@ -49,7 +65,7 @@ Only variable names are listed here; no credentials are reproduced.
 | `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Mobile client / launcher or `mobile/.env` | Public publishable or validated legacy anon client key. |
 | `EXPO_PUBLIC_SUPABASE_ANON_KEY` | Mobile client / shell or `mobile/.env` | Legacy public-key fallback when no publishable-key setting is provided. |
 
-The default API port is 3000. The standalone backend defaults to loopback; mobile startup intentionally binds it to all local interfaces. The default Ecurious origin is the supplied [challenge service](https://parking-lock-service-production.up.railway.app/). These defaults do not configure a production deployment.
+The default API port is 3000; the current development session uses 3001. The standalone backend defaults to loopback; mobile startup binds it to all local interfaces. The default Ecurious origin is the supplied [challenge service](https://parking-lock-service-production.up.railway.app/). These defaults do not configure a production deployment.
 
 Root launchers load the optional root `.env`, then construct the Expo child environment in [mobile-environment.mjs](../scripts/mobile-environment.mjs). Directory-key precedence is the public Expo name, then `GOINGELECTRIC_API_KEY`, then `ELECTRIC_API_KEY`. Supabase-key precedence is the public publishable name, public anon name, root publishable name, root anon name, then `SUPABASE_API_KEY`. The selected key is forwarded under the public publishable name, including when it is a legacy anon JWT. The public Supabase URL takes precedence over the root URL.
 
@@ -96,10 +112,10 @@ The client normally derives the laptop address from Expo's development URL. A ph
 1. Complete the local driver profile or choose **Explore map first**. Editing it later returns to the retained map. Contact fields and the raw plate remain in native SecureStore; browser previews use memory only. These details do not authenticate a Supabase user.
 2. Search the initial Berlin viewport or pan and choose **Search this area**. **My location** requests foreground permission only when tapped; denying it still permits manual browsing. The initial location is a fixed view, not a detected position.
 3. Use Filters for minimum power, the saved connector, reported faults, reserved inventory and test locations. Public GoingElectric entries are visible by default. Their physical availability is unknown, and listed plug counts are not registered bay identities.
-4. After hosted Supabase activation, choose a listed app plug at a public directory location. A fresh complete hold read marks it **unreserved in BayReady** when no app hold exists. Confirming a short software hold prevents another BayReady user from reserving that same virtual choice; other listed choices stay independently allocatable. A saved local profile is required for a new confirmation; it is not sent to the booking service. Reported-fault locations disable new app holds in the UI.
+4. Choose a listed app plug at a public directory location. Hosted Supabase is configured. A fresh complete read marks an absent current hold **unreserved in BayReady**. Now/free ten minutes or a calendar booking allocates its software window; other listed choices remain independent. Profile contacts are not sent to this booking service. Reported-fault locations disable new app holds in the UI.
 5. Separately, enable **Show test location** for the explicitly fictional registered Berlin inventory. Choose a bay and an individual compatible plug. This registered-inventory hold covers every plug on that physical-bay model, unlike an independent directory app slot.
 6. Inspect the server-derived deadline and cancellation from the booking card or reserved list. A countdown reaching zero does not free a slot or bay until a new database read confirms it. Your directory holds stay cancellable even after moving outside the original viewport or after the listed catalog changes.
-7. Use `/reserve` for the independent simulator rehearsal and Activity for its timeline/diagnostics. Activity also links to `/hardware`, the guarded designated-bay screen; its initial setup state is expected until operator activation. Simulator controls never modify database holds or real hardware.
+7. Use `/reserve` for the independent simulator and Activity for its timeline/diagnostics. Activity links to `/hardware`, currently configured for the separate `lock-0002` barrier test. Inspect current telemetry and operation status there; a pending intent or an enabled gate does not establish protection. Simulator controls never modify database holds or real hardware.
 
 GoingElectric, Supabase and local API failures are independent. The map/profile can still be used without a running laptop simulator; cloud discovery and shared holds require their respective services and internet. No offline fake hold replaces an unavailable database.
 
@@ -107,9 +123,9 @@ GoingElectric, Supabase and local API failures are independent. The map/profile 
 
 Follow [SUPABASE.md](SUPABASE.md) for the complete schema, ownership and migration contract. The configured public key does not authorize DDL or project configuration. A connected administrator must inspect the target project and its applied-migration history first.
 
-Apply the [initial booking migration](../supabase/migrations/20261024120000_bayready_reservations.sql), the [location/bay/connector migration](../supabase/migrations/20261024130000_location_bay_connectors.sql), the [directory app-plug migration](../supabase/migrations/20261024140000_directory_plug_holds.sql), then the [hardware workflow migration](../supabase/migrations/20261024150000_hardware_workflow.sql) using the connected migration tooling or the project's SQL editor. Do not rerun a migration already applied or reset existing data. The second migration preserves historical holds and replaces the earlier reserve signature. The third adds a separate virtual-slot allocation domain without importing directory catalog data.
+The hosted project already has the reviewed schema and Auth configuration. Inspect its pinned version/checksum history through `node --env-file-if-exists=.env scripts/setup-supabase.mjs --inspect`. Apply only reviewed additive changes through the guarded path in [SUPABASE.md](SUPABASE.md); never rerun an applied migration or reset project data. Directory software allocation, fictional whole-bay holds and guarded physical inventory remain separate.
 
-Enable anonymous sign-ins in Supabase Authentication settings, then restart Expo and check the narrow authenticated RPCs from the app. Supabase anonymous authentication creates a guest user with a persistent owner UUID; possession of an anon API key alone does not provide that user identity. Native guest sessions are saved in serialized SecureStore chunks. Browser previews keep them in memory, so refreshing a browser can lose its guest identity.
+Anonymous sign-ins and manual identity linking are enabled in the current project. Anonymous authentication creates a guest with a persistent owner UUID; an anon API key alone does not provide that identity. Native sessions use serialized SecureStore chunks. Browser previews keep them in memory, so refreshing can lose a guest identity.
 
 Use two devices/sessions to confirm exclusivity of the same listed app slot, independence of different slots, deadline visibility, owner-only cancellation and expiry. Separately confirm whole-bay allocation across different plugs on one registered bay. Record these as hosted evidence only after observing them. The prepared registered seed has no real GoingElectric or Ecurious mapping, and its reserve RPC refuses Ecurious-mode bays. Inventory administration is not exposed to the phone.
 
@@ -130,7 +146,7 @@ Official references: [Supabase anonymous authentication](https://supabase.com/do
 | Empty directory results | Review the preferred connector and manual power filter, move to a smaller/relevant viewport and search again. A station without a current displayed result is not proof of removal or unavailability. |
 | Previous map results disappear | Directory results deliberately expire from memory after roughly one hour, including a check when returning to the foreground. Search again for a fresh snapshot. |
 | Location permission denied | Continue with pan/zoom, or enable the app's foreground permission in device settings and retry the location control. Background tracking is not implemented. |
-| Supabase setup/auth error | Verify all four migrations and anonymous-auth activation. A public client key cannot complete those administrator steps. Do not switch to a service-role key in the app. |
+| Supabase setup/auth error | Inspect the applied migration/checksum history and Auth flags with npm run supabase:setup -- --inspect. A public client key cannot perform administrator changes. Do not switch to a service-role key in the app. |
 | Reservation response is uncertain | Do not blindly repeat the write. The provider reads availability afterward; refresh and inspect your restored hold before trying another action. SDK retries are disabled for booking RPCs. |
 | Another driver reserved the bay | `BAY_RESERVED` is an expected allocation conflict. Refresh and choose another registered bay. Choosing another plug on the same bay cannot bypass its hold. |
 | Another driver reserved the listed app plug | `PLUG_RESERVED` is an expected software-slot conflict. Refresh and choose another unreserved app slot. This does not establish the actual charger or bay's occupancy. |
@@ -138,8 +154,9 @@ Official references: [Supabase anonymous authentication](https://supabase.com/do
 | Reserved countdown reaches zero but marker stays reserved/stale | Expiry is governed by database time and a new server read, not the phone clock. Refresh when connected. |
 | Profile or guest session cannot be restored | Retry device storage without overwriting unreadable data. Profile save failures retain the form draft. Do not clear app storage as routine troubleshooting while depending on an active guest-owned hold; a lost guest identity cannot be recovered; optionally upgrade it to verified email/password first through Profile → Sign in & account. |
 | Hardware key rejected after rotation | Update the backend setting and restart it. Phone configuration does not contain or update that credential. |
-| Hardware appears offline, old or unknown | Inspect the observation time and ask the mentors to verify the designated device. HTTP service health or an old vacant report does not establish current safe physical state. |
-| Hardware shows wildcard camera access | It is an observed access policy, not exclusive booking enforcement. Do not assume the selected vehicle controls entry; specific-plate behavior and hardware interlocks still need verification. |
+| Hardware is enabled but shows `TELEMETRY_UNKNOWN` | Configuration and sample freshness are separate. The observed device cadence was about three minutes; wait for a new provider sample. Keep protection pending and preserve the five-second movement rule. Do not reset ownership or claim physical vacancy from the earlier sample. |
+| Hardware appears offline, old or unknown | Inspect provider time/connectivity. HTTP health and a successful poll do not refresh a stored sensor sample. Confirm device behavior with the operator if fresh data stops arriving. |
+| Hardware shows wildcard camera access | Protection preflight must fail because another recognized plate could lower the arm. The test's reported policy was cleared at `13:55:56.915Z`; every later preflight must still check it. |
 
 The Ecurious adapter uses a six-second request timeout, a 1 MiB body limit and no redirects. Its 60-second telemetry display limit is an app policy, not a certified safety threshold. The phone's hardware request has its own 12-second outer limit. The hardware panel ages retained snapshots; a failed refresh leaves physical state unknown.
 
@@ -166,7 +183,7 @@ The driver-profile [build-log checkpoint](BUILD-LOG.md) records 63 passing Node 
 
 The directory-hold checkpoint passed **81 combined Node tests**, syntax/mobile TypeScript, all three migrations and independent-session database races, and a fresh Android bundle export with server credentials absent. It includes seven [pure contract tests](../test/directory-booking-contract.test.mjs), six [mocked hook tests](../test/directory-bookings-hook.test.mjs) and five [slot identity/pagination tests](../test/directory-slots.test.mjs). The hook tests execute the real hook through controlled state/effect timing and stubbed network calls, covering immediate viewport invalidation, failed-read behavior, duplicate-write suppression, uncertain-result reconciliation, outside-viewport cancellation and scope changes during a write. They use the already-installed mobile TypeScript package; install mobile dependencies before running them. They do not render native components or contact the hosted project. See the latest [build-log entry](BUILD-LOG.md) for exact evidence and exclusions.
 
-These observations are historical evidence, not a fresh health check. Physical Android gestures, layout, permission prompts and profile editing have not been confirmed on a phone by this work. Hosted migrations/auth, two-phone synchronization, live plate-event processing, hardware writes and a complete reserve → arrive → charge → release cycle remain unverified. Existing hardware observations must not be presented as its current state.
+Historical software checks are not a fresh health check or proof of Android touch behavior. Hosted setup and the barrier movements/cleanup have separate dated evidence above. Two-phone synchronization, live plate-bound entry with occupied/departure sensor observations, and the complete challenge cycle remain unverified. Existing hardware observations must not be presented as current after they age out.
 
 ## Deployment boundary
 
@@ -174,11 +191,11 @@ Expo Go is the current development target. An independent Android binary needs i
 
 No production backend, release build, hosted Node deployment, payment processor or administrator console is configured. The LAN simulator has no user authentication and exposes rehearsal controls; it is not the production reservation service. A production design still needs authenticated operations, deployment/secrets management, retention and account recovery, inventory administration, monitoring, and confirmed physical control/event contracts. Implementing those is separate from activating the prepared software-hold schema.
 
-Before a real hardware demonstration, use the mentor-confirmed bay mapping and the open items in [ECURIOUS-API.md](ECURIOUS-API.md). Read-only diagnostics do not complete the mandatory challenge integration. Record actual commands, acknowledgement versus observation, failures and accepted charging evidence in [BUILD-LOG.md](BUILD-LOG.md).
+Use the enrolled barrier-test mapping and the recorded operator confirmations for the scoped hardware demonstration. Keep its no-charger boundary visible. Record commands, acknowledgement versus newer observations, failures and the still-missing plate/occupancy sequence in [BUILD-LOG.md](BUILD-LOG.md); a read-only panel or a partial bench cycle does not complete the challenge cycle.
 
 ## Activate or recover the designated hardware worker
 
-Follow [HARDWARE-SETUP.md](HARDWARE-SETUP.md) for exact enrollment and recovery. The fourth migration creates private controls and a command ledger with no live seed. An administrator must confirm the bay/lock mapping and actual interlocks before setting its disabled defaults. A backend-only secret/service-role key, explicit assigned IDs and `ECURIOUS_COMMANDS_ENABLED=true` are additionally required. Keep `ECURIOUS_MODE=mock`: it describes the separate simulator and does not select physical workflow mode.
+Follow [HARDWARE-SETUP.md](HARDWARE-SETUP.md) for enrollment and recovery. New controls default disabled and migrations seed no real lock. The current `lock-0002` barrier-only row has the operator-confirmed mapping/interlocks and explicit backend activation described above. A new deployment still requires those independent gates. Keep `ECURIOUS_MODE=mock`: it describes the separate simulator and does not select physical workflow mode.
 
 Protection, entry and release are authenticated application intents. The private worker takes a durable claim, validates current observations, commits one dispatch permit, sends at most one command and waits for confirmation. It polls every five seconds. The control observation policy defaults to five seconds; the phone polls every five foreground seconds and pauses actions after fifteen seconds without a workflow response. Missing or malformed fault telemetry, water-ingress uncertainty, stale occupancy, wildcard auto-access for protection, conflicting timestamps or an unassigned lock prevent movement.
 
@@ -186,4 +203,4 @@ No-ACK delivery uncertainty cannot be resolved automatically by a matching GET, 
 
 The mobile connection uses LAN HTTP during development; its guest JWT therefore travels over that local connection. A hosted backend needs HTTPS, authenticated deployment and operational controls before use outside this rehearsal network. Private credentials remain backend-only in either setup.
 
-The latest hardware checkpoint passed **144 combined Node tests**, syntax/mobile TypeScript, isolated PostgreSQL contract/concurrency tests and Android export checks as recorded in [BUILD-LOG.md](BUILD-LOG.md). Mocked tests exercise uncertain delivery, delayed permits, shutdown, simultaneous workers, stale/conflicting observations, ownership and mobile no-retry behavior. These are software evidence; no provider POST or supervised physical cycle has been performed.
+An earlier hardware checkpoint passed **144 combined Node tests**, syntax/mobile TypeScript, isolated PostgreSQL contract/concurrency tests and Android export checks. Mocked tests cover uncertain delivery, delayed permits, shutdown, simultaneous workers, stale/conflicting observations, ownership and mobile no-retry behavior. Later actual barrier movements and cleanup are recorded separately above and in [BUILD-LOG.md](BUILD-LOG.md); they do not prove plate check-in, sensor-confirmed arrival/departure or charging.

@@ -7,6 +7,7 @@ import { EcuriousAdapter, EcuriousApiError } from './lib/ecurious-adapter.mjs';
 import { HardwareWorkflowError, SupabaseHardwareStore } from './lib/hardware-store.mjs';
 import { HardwareWorkflowService } from './lib/hardware-workflow.mjs';
 import { HardwareSlotService, reservationQuote, RESERVATION_POLICY } from './lib/hardware-slots.mjs';
+import { MultiCarLab, LabError } from './lib/multi-car-lab.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const MAX_BODY_BYTES = 8 * 1024;
@@ -57,7 +58,7 @@ function isWithin(root, target) {
 }
 
 /** Exported for an HTTP smoke test without binding a production port. */
-export function createServer({ simulator = createSimulator(), hardware = new EcuriousAdapter(), hardwareWorkflow = null, hardwareSlots = null, publicDir = resolve(ROOT, 'public') } = {}) {
+export function createServer({ simulator = createSimulator(), simulation = new MultiCarLab(), hardware = new EcuriousAdapter(), hardwareWorkflow = null, hardwareSlots = null, publicDir = resolve(ROOT, 'public') } = {}) {
   return createHttpServer(async (request, response) => {
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader('Referrer-Policy', 'no-referrer');
@@ -70,6 +71,10 @@ export function createServer({ simulator = createSimulator(), hardware = new Ecu
           json(response, 200, { healthy: true, mode: 'mock' });
         } else if (request.method === 'GET' && url.pathname === '/api/state') {
           json(response, 200, simulator.getState());
+        } else if (request.method === 'GET' && url.pathname === '/api/simulation') {
+          json(response, 200, simulation.snapshot());
+        } else if (request.method === 'POST' && url.pathname === '/api/simulation/actions') {
+          json(response, 200, simulation.act(await readJson(request)));
         } else if (request.method === 'GET' && url.pathname === '/api/hardware') {
           json(response, 200, await hardware.listLocks());
         } else if (request.method === 'GET' && url.pathname === '/api/hardware/bookings') {
@@ -85,6 +90,11 @@ export function createServer({ simulator = createSimulator(), hardware = new Ecu
           });
         } else if (request.method === 'POST' && url.pathname === '/api/hardware/quote') {
           json(response, 200, hardwareSlots ? hardwareSlots.quote(await readJson(request)) : reservationQuote(await readJson(request)));
+        } else if (request.method === 'POST' && url.pathname === '/api/integrations/plate-recognition') {
+          if (!hardwareSlots?.configured) throw new HardwareWorkflowError('HARDWARE_SETUP_REQUIRED', 'Designated hardware control is not activated on this backend.', 503);
+          const result = await hardwareSlots.recognize(request.headers.authorization, await readJson(request));
+          json(response, 202, result);
+          if (result.entryRequested) void hardwareWorkflow?.tick();
         } else if (request.method === 'POST' && ['/api/hardware/slots', '/api/hardware/slots/cancel', '/api/hardware/slots/extend'].includes(url.pathname)) {
           if (!hardwareSlots?.configured) throw new HardwareWorkflowError('HARDWARE_SETUP_REQUIRED', 'Scheduled hardware bookings are not activated on this backend.', 503);
           const authorization = request.headers.authorization;
@@ -110,8 +120,8 @@ export function createServer({ simulator = createSimulator(), hardware = new Ecu
           json(response, 201, simulator.reserve(await readJson(request)));
         } else if (request.method === 'POST' && url.pathname === '/api/actions') {
           json(response, 200, simulator.action(await readJson(request)));
-        } else if (['/api/state', '/api/health', '/api/hardware', '/api/reservations', '/api/actions', '/api/hardware/bookings', '/api/hardware/actions', '/api/hardware/slots', '/api/hardware/slots/cancel', '/api/hardware/slots/extend', '/api/hardware/quote'].includes(url.pathname)) {
-          const allow = ['/api/hardware/bookings', '/api/hardware/slots'].includes(url.pathname) ? 'GET, POST' : ['/api/state', '/api/health', '/api/hardware'].includes(url.pathname) ? 'GET' : 'POST';
+        } else if (['/api/state', '/api/health', '/api/hardware', '/api/reservations', '/api/actions', '/api/hardware/bookings', '/api/hardware/actions', '/api/hardware/slots', '/api/hardware/slots/cancel', '/api/hardware/slots/extend', '/api/hardware/quote', '/api/integrations/plate-recognition', '/api/simulation', '/api/simulation/actions'].includes(url.pathname)) {
+          const allow = ['/api/hardware/bookings', '/api/hardware/slots'].includes(url.pathname) ? 'GET, POST' : ['/api/state', '/api/health', '/api/hardware', '/api/simulation'].includes(url.pathname) ? 'GET' : 'POST';
           json(response, 405, { error: { code: 'METHOD_NOT_ALLOWED', message: 'This route does not support that method.' } }, { Allow: allow });
         } else {
           json(response, 404, { error: { code: 'NOT_FOUND', message: 'API route not found.' } });
@@ -157,7 +167,7 @@ export function createServer({ simulator = createSimulator(), hardware = new Ecu
         response.destroy();
         return;
       }
-      if (error instanceof DomainError || error instanceof EcuriousApiError || error instanceof HardwareWorkflowError) {
+      if (error instanceof DomainError || error instanceof EcuriousApiError || error instanceof HardwareWorkflowError || error instanceof LabError) {
         json(response, error.status, { error: { code: error.code, message: error.message } });
       } else {
         // Do not log request bodies, scanned plates or third-party error payloads.
@@ -189,7 +199,7 @@ export function start({ env = process.env } = {}) {
     serverKey: env.SUPABASE_SECRET_KEY || env.SUPABASE_SERVICE_ROLE_KEY,
   });
   const hardwareSlots = new HardwareSlotService({
-    store, hardware, commandsEnabled: rawCommandsEnabled === 'true', plateHashKey: env.BAYREADY_PLATE_HASH_KEY,
+    store, hardware, commandsEnabled: rawCommandsEnabled === 'true', plateHashKey: env.BAYREADY_PLATE_HASH_KEY, visionToken: env.BAYREADY_VISION_TOKEN,
     lockIds: (env.ECURIOUS_LOCK_IDS ?? '').split(',').map(id => id.trim()).filter(Boolean),
   });
   const hardwareWorkflow = new HardwareWorkflowService({
