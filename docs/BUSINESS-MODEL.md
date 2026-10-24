@@ -2,6 +2,8 @@
 
 **Prepared for WATT THE HACK, 24 October 2026.** Commercial proposal, not implemented billing or validated market performance. Every BayReady price, demand input, cost, service target and forecast below is an **assumption to test**. Official external examples are cited separately. Amounts charged to drivers are gross customer amounts; B2B prices and operating contribution are net of VAT unless stated otherwise.
 
+**Current demo:** the pulled mobile map has a direct **Audimax** hardware flow with 30-second arrival windows, plate-whitelist programming, an optional €1 mock extension and €1 mock advance booking. The separate standard Supabase/backend workflow uses ten-minute windows. Neither takes real payments. Direct raise/lower requests have acknowledgements and newer matching device reports; the complete customer plate/occupancy/departure cycle remains unverified. The enrolled lock-0002 rig is barrier-only and supplies no real charging energy. See the [presenter runbook](DEMO.md). Ecurious is the intended BayReady operator; the commercial proposal below is for sales to charging operators or site hosts, not a confirmed Ecurious offer.
+
 ## 1. What the challenge requires
 
 The four-page [original brief](../source/challenge-brief.pdf) asks for a public charging reservation feature that makes the bay available on arrival. Page 1 supplies the hardware/server/camera concept and GoingElectric discovery. Pages 2–3 explicitly ask who pays, how reservations and no-shows are priced, how blocked vehicles are handled, and whether utilisation improves. Page 4 assigns **20% to Business Case & CPO Value**, alongside 30% technical implementation, 20% concept, 15% interoperability and 15% documentation. A full real hardware cycle is required for top ranks; a business plan does not replace it.
@@ -26,9 +28,18 @@ Do not launch across arbitrary directory stations. An explicitly contracted and 
 
 **Segment boundaries:** immediate DC arrival is the first economic experiment. Destination AC can work as a host-sponsored benefit, but lower delivered power changes the business case. Future hotel appointments, overnight parking and fleet shift slots require scheduled inventory and departure rules; they are separate products. An occupied charger is never sold on a prediction of when its current session will finish.
 
-## 3. Recommended prices and who pays
+## 3. Demo prices and proposed commercial prices
 
-Launch one simple operator-funded offer; test a genuinely paid reservation only at eligible sites where customers value it. Keep the operator's existing electricity and parking tariffs visible and separate.
+Keep the working prototype's mock tariff distinct from the commercial experiments and the calculator:
+
+| Working flow | Immediate hold | Paid extension | Advance booking |
+| --- | --- | --- | --- |
+| Audimax direct map demo | **30 seconds free** | **+30 seconds, €1 mock** | **€1 mock**; raise request T−30 seconds, unused deadline T+30 seconds; requires the app running |
+| Standard shared app/backend workflow | **10 minutes free** | **+10 minutes, €1 mock** | **€1 mock**; enrolled hardware protection intent T−10 minutes, unused deadline T+10 minutes |
+
+The Audimax hold is local to the phone and controls the provided test lock directly; public directory holds are shared software bookings and do not control public hardware. No real charge, no-show penalty, payment authorization or refund transfer is implemented. Mock scheduled-failure refunds belong to the standard booking workflow. These prototype amounts are not added to the future commercial offers below.
+
+For a commercial pilot, propose one simple operator-funded offer; test a genuinely paid reservation only at eligible sites where customers value it. Keep the operator's existing electricity and parking tariffs visible and separate. Every table entry below is a proposal, including **€29 per equipped bay/month**; the €1.99 experiment and no-show ceiling are not the demo tariff.
 
 | Item | Proposed price | Conditions and recipient |
 | --- | --- | --- |
@@ -48,6 +59,8 @@ In a retail-sponsored arrangement the retailer can pay the €29 directly. That 
 **Illustrative customer bill:** 20 kWh at an assumed €0.59/kWh is €11.80. The credited offer is €11.80 + €1 − €1 = **€11.80**; paid mode is **€13.79**. A verified no-show costs at most **€3 total**, with no electricity charge. A blocked-bay failure costs **€0 for the reservation**. The energy price is an example, not a recommended tariff or prediction.
 
 ## 4. Normal reservation rules
+
+This section describes the commercial ten-minute experiment used by the calculator, not the accelerated Audimax demo or every existing app option. Its proposed launch omits paid extensions and advance bookings to isolate the effect of short immediate holds; the prototype already exposes both for demonstration. The existing scenario inputs and calculations are unchanged.
 
 1. Offer an immediate hold only for a correctly mapped, compatible, authoritatively available bay with fresh occupancy/hardware status. Show connector, power information, exact deadline, energy/parking prices, reservation charges, refund policy and operator contact.
 2. Allow one active booking per account. Obtain any required payment authorization, then confirm availability and the hardware outcome. Display “confirmed” only when the documented physical reservation state is confirmed; otherwise show pending/failed and release the authorization on failure.
@@ -213,7 +226,7 @@ The defensible asset would be reliable contracted inventory, measured recovery o
 
 ## 10. Validation plan and go/no-go rules
 
-**At the hackathon:** demonstrate the actual reserve → reliable vehicle check-in → agreed charging evidence → safe release cycle, then no-show and blocked-bay recovery. Explain proposed fee outcomes with fictional receipts; do not take real payments. Record actual hardware/API evidence in [BUILD-LOG.md](BUILD-LOG.md). Current reservation/charging controls are simulated, payments do not exist, real Ecurious diagnostics are read-only, and the native map retrieves GoingElectric directory data directly.
+**At the hackathon:** demonstrate the actual reserve → reliable vehicle check-in → agreed charging evidence → safe release cycle where the provided equipment supports it, then no-show and blocked-bay recovery. Record actual hardware/API evidence in [BUILD-LOG.md](BUILD-LOG.md). The pulled Audimax map sends real raise, whitelist and release requests, with accelerated local timers; the separate backend has a durable guarded workflow. Direct raise/lower movement has been observed, but the complete customer recognition/occupancy/departure cycle remains unverified. This barrier-only rig cannot demonstrate electrical charging. The original reservation/charging simulator and scenario lab remain fictional; displayed payments/refunds are mock, with no collection. GoingElectric discovery retrieves real directory listings directly, without establishing vacancy. Follow the [demo runbook](DEMO.md) and name these sources separately.
 
 **First 30 days after a willing partner agrees:** confirm supplier/installed cost, legal parking authority, merchant/credit settlement, charger/occupancy events, support costs and customer terms. Interview at least ten drivers and three buyer/site contacts as a discovery target, not evidence of traction. Instrument actual delivered energy, blocking time and staff workload. Use at least two comparable sites or matched/randomized site-days where practical.
 

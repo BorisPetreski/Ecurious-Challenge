@@ -8,6 +8,7 @@ import { HardwareWorkflowError, SupabaseHardwareStore } from './lib/hardware-sto
 import { HardwareWorkflowService } from './lib/hardware-workflow.mjs';
 import { HardwareSlotService, reservationQuote, RESERVATION_POLICY } from './lib/hardware-slots.mjs';
 import { MultiCarLab, LabError } from './lib/multi-car-lab.mjs';
+import { EventbriteEvents } from './lib/eventbrite-events.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const MAX_BODY_BYTES = 8 * 1024;
@@ -58,7 +59,7 @@ function isWithin(root, target) {
 }
 
 /** Exported for an HTTP smoke test without binding a production port. */
-export function createServer({ simulator = createSimulator(), simulation = new MultiCarLab(), hardware = new EcuriousAdapter(), hardwareWorkflow = null, hardwareSlots = null, publicDir = resolve(ROOT, 'public') } = {}) {
+export function createServer({ simulator = createSimulator(), simulation = new MultiCarLab(), hardware = new EcuriousAdapter(), hardwareWorkflow = null, hardwareSlots = null, events = new EventbriteEvents(), publicDir = resolve(ROOT, 'public') } = {}) {
   return createHttpServer(async (request, response) => {
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader('Referrer-Policy', 'no-referrer');
@@ -71,6 +72,8 @@ export function createServer({ simulator = createSimulator(), simulation = new M
           json(response, 200, { healthy: true, mode: 'mock' });
         } else if (request.method === 'GET' && url.pathname === '/api/state') {
           json(response, 200, simulator.getState());
+        } else if (request.method === 'GET' && url.pathname === '/api/events') {
+          json(response, 200, await events.listEvents());
         } else if (request.method === 'GET' && url.pathname === '/api/simulation') {
           json(response, 200, simulation.snapshot());
         } else if (request.method === 'POST' && url.pathname === '/api/simulation/actions') {
@@ -120,8 +123,8 @@ export function createServer({ simulator = createSimulator(), simulation = new M
           json(response, 201, simulator.reserve(await readJson(request)));
         } else if (request.method === 'POST' && url.pathname === '/api/actions') {
           json(response, 200, simulator.action(await readJson(request)));
-        } else if (['/api/state', '/api/health', '/api/hardware', '/api/reservations', '/api/actions', '/api/hardware/bookings', '/api/hardware/actions', '/api/hardware/slots', '/api/hardware/slots/cancel', '/api/hardware/slots/extend', '/api/hardware/quote', '/api/integrations/plate-recognition', '/api/simulation', '/api/simulation/actions'].includes(url.pathname)) {
-          const allow = ['/api/hardware/bookings', '/api/hardware/slots'].includes(url.pathname) ? 'GET, POST' : ['/api/state', '/api/health', '/api/hardware', '/api/simulation'].includes(url.pathname) ? 'GET' : 'POST';
+        } else if (['/api/state', '/api/health', '/api/events', '/api/hardware', '/api/reservations', '/api/actions', '/api/hardware/bookings', '/api/hardware/actions', '/api/hardware/slots', '/api/hardware/slots/cancel', '/api/hardware/slots/extend', '/api/hardware/quote', '/api/integrations/plate-recognition', '/api/simulation', '/api/simulation/actions'].includes(url.pathname)) {
+          const allow = ['/api/hardware/bookings', '/api/hardware/slots'].includes(url.pathname) ? 'GET, POST' : ['/api/state', '/api/health', '/api/events', '/api/hardware', '/api/simulation'].includes(url.pathname) ? 'GET' : 'POST';
           json(response, 405, { error: { code: 'METHOD_NOT_ALLOWED', message: 'This route does not support that method.' } }, { Allow: allow });
         } else {
           json(response, 404, { error: { code: 'NOT_FOUND', message: 'API route not found.' } });
@@ -211,7 +214,8 @@ export function start({ env = process.env } = {}) {
     'Hardware control needs a backend Supabase server key, project settings, Ecurious key and explicit assigned lock IDs.', 503);
   if (rawCommandsEnabled === 'true' && !hardwareSlots.configured) throw new HardwareWorkflowError('HARDWARE_CONFIGURATION',
     'Scheduled hardware bookings need a stable backend-only BAYREADY_PLATE_HASH_KEY.', 503);
-  const server = createServer({ hardware, hardwareWorkflow, hardwareSlots });
+  const events = new EventbriteEvents({ env });
+  const server = createServer({ hardware, hardwareWorkflow, hardwareSlots, events });
   server.on('close', () => hardwareWorkflow.stop());
   server.listen(Number(rawPort), host, () => {
     const localHost = host === '0.0.0.0' ? '127.0.0.1' : host;

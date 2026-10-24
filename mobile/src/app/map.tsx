@@ -32,7 +32,6 @@ import {
 import { AudimaxBookingModal } from '@/components/audimax-booking-modal';
 import { MunichEventsModal } from '@/components/munich-events-modal';
 import {
-  MUNICH_MOCK_EVENTS,
   type MunichEvent,
   type EventChargingSpot,
 } from '@/lib/munich-events';
@@ -140,7 +139,7 @@ export default function MapScreen() {
   const [audimaxActionNotice, setAudimaxActionNotice] = useState<string | null>(null);
   const [audimaxModalOpen, setAudimaxModalOpen] = useState(false);
   const [eventsModalOpen, setEventsModalOpen] = useState(false);
-  const [selectedEvent, setSelectedEvent] = useState<MunichEvent>(MUNICH_MOCK_EVENTS[0]);
+  const [selectedEvent, setSelectedEvent] = useState<MunichEvent | null>(null);
   const [activeEventFilter, setActiveEventFilter] = useState<MunichEvent | null>(null);
 
   const audimaxPollBusyRef = useRef(false);
@@ -804,7 +803,7 @@ export default function MapScreen() {
                 {activeEventFilter.title}
               </Text>
               <Text style={styles.eventPillSubtitle} numberOfLines={1}>
-                {activeEventFilter.venue} · Top 5 free chargers
+                {activeEventFilter.source === 'eventbrite' ? 'Eventbrite' : 'Demo event'} · {activeEventFilter.venue} · Nearby charging
               </Text>
             </View>
             <Pressable

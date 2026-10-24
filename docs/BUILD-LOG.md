@@ -1,5 +1,12 @@
 # Build log and submission evidence
 
+## 24 October 2026 — pulled demo documentation and Eventbrite feed
+
+- Reviewed pulled `05b7986` and documented its actual primary Map/Audimax direct-command flow, 30-second presentation timing, native whitelist entry, local holds/foreground timers and manual Leave Bay. Kept separate the shared Supabase booking path, older durable hardware/session path and fictional scenario lab.
+- Replaced README with a short launch/demo guide; added `docs/SETUP.md` and `docs/DEMO.md`; rewrote the canonical system design and three-minute pitch (326 spoken words plus demo time). Updated API/privacy/business references with current data boundaries and clearly labelled commercial assumptions. No new physical verification is claimed by documentation.
+- Added read-only Eventbrite organization/curated-event integration and mobile source/empty/demo states. The supplied private token authenticated, but the organization returned zero eligible upcoming/current public located Munich events. The user chose **demo events for the presentation**. Private Eventbrite variables are removed from the Expo child environment; hardware commands/timers were unchanged.
+- Eventbrite backend tests passed 8/8, mobile tests 4/4, launcher tests 3/3 and mobile TypeScript passed. No Eventbrite writes, hardware POSTs, database migrations, Git commit or push were performed in this documentation/feed task. User then requested immediate documentation handover and stopped additional work.
+
 ## 24 October 2026 — barrier-only app test and live movement evidence
 
 - User identified **lock-0002 as barrier-only hardware**, later relayed operator confirmations for occupancy interlocks, automatic re-raising and OCR with automatic camera entry disabled, and confirmed exclusive team use after other teams had previously used it. These are user-relayed confirmations; they do not establish a completed customer cycle or electrical charging.

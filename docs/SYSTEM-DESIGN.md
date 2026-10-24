@@ -1,317 +1,231 @@
 # BayReady system design
 
-This document describes the repository as of 24 October 2026. It connects the product model, mobile screens, data ownership, reservation rules and integration boundaries. Exact database and wire contracts live in [DATABASE.md](DATABASE.md) and [API.md](API.md); setup and recovery steps live in [OPERATIONS.md](OPERATIONS.md).
+This describes the implementation pulled in commit `05b7986` on 24 October 2026, the subsequent Eventbrite planner integration, and the retained booking services and rehearsal tools. The presentation path is the **Audimax hardware card on the Map**, which sends commands directly to Ecurious. The separate **Hardware test** screen uses the older Node/Supabase workflow; the two paths have different ownership, timing and camera policies.
 
-## Purpose and implementation status
+Use [README.md](../README.md) for startup and the simple demo, [API.md](API.md) for wire contracts, [DATABASE.md](DATABASE.md) for tables/transactions, and [BUILD-LOG.md](BUILD-LOG.md) for dated observations. Code availability, HTTP acceptance, device reports and an observed complete customer cycle are different kinds of evidence. The user reports that the pulled app path works; this document does not manufacture additional camera, charging or reliability evidence.
 
-BayReady helps an EV driver find a compatible location, choose a plug, create a short application hold and see its deadline. The hackathon also calls for a real reserve → recognized arrival → charge → release cycle on the designated Ecurious hardware. That physical cycle remains integration work; directory discovery and a shared database hold alone do not fulfil it. See the [source brief](../source/challenge-brief.txt).
+## Product and current capabilities
 
-| Capability | Current implementation | Practical limit |
+BayReady connects charger discovery to a reservation and vehicle access experience. It addresses the gap between finding a charger on a map and having access to its parking bay on arrival. The challenge requires app ↔ Ecurious server ↔ designated hardware integration; public directory software holds alone do not meet that requirement. The [source brief](../source/challenge-brief.txt) defines the deliverables and judging criteria.
+
+| Capability | Implemented behavior | Scope of the claim |
 | --- | --- | --- |
-| Android app | Expo Go, native map, profile, filters and booking UI | Physical phone rendering/gestures still require preview |
-| Charger discovery | Direct device GoingElectric API client | Listings have no verified individual bay IDs or live occupancy |
-| Driver profile and account | Local preferences plus guest/email Supabase identity | Profile and identity are separate; email verification requires the user's mailbox |
-| Shared app holds | Supabase migrations, guest client, atomic reservation functions | Hosted schema/Auth configured; native mailbox/phone preview remains unverified |
-| Registered bay inventory | Location → bay → connector, whole-bay exclusivity | Only fictional inventory is seeded; live mode refuses booking |
-| Listed plug holds | Separate virtual slots derived from directory groups | Software allocation only; physical correspondence is unknown |
-| Lifecycle rehearsal | In-memory Node simulator and original browser UI | Separate state from Supabase; reset/restart loses it |
-| Real hardware | Backend-only diagnostics plus guarded protect/entry/release workflow | Commands default off; hosted activation, enrollment and supervised physical verification pending |
-| Payment and charging | Mock payment choice and simulated charge transition | No payment processor, energy delivery or charging-session API |
-| Scheduled hardware sessions | Exclusive bay windows, camera-matched entry and arrival/departure tracking | Enrolled hardware required; session duration does not prove electrical charging |
+| Mobile app | Expo Go, native map, profile, filters and booking sheets | Android is the primary target |
+| Discovery | GoingElectric requests directly from the device; listed connectors, power and reported faults | Directory information, not real-time vacancy |
+| Driver setup | Local name/contact/plate preferences, connector selection and mock payment | Formatting checks do not verify identity or payment |
+| Audimax hardware demo | Direct lock/whitelist/unlock requests from the Map; countdown, extensions and occupancy display | Selected `lock-0002` is barrier-only test hardware, with no charger |
+| Events | Backend Eventbrite feed, explicit seven-event demo option and five nearby suggestions ordered by distance | Real events need an organization or curated IDs; nearby charging counts remain separate/unverified |
+| Shared public bookings | Supabase guest/email identity, virtual directory-slot holds and owner cancellation | Shared software allocation, without public hardware control |
+| Registered inventory | Location → one-vehicle bay → connector; whole-bay exclusion | Physical topology requires operator enrollment; the ordinary seed is fictional |
+| Durable hardware workflow | Node worker, private operation ledger, scheduled windows, camera matching and cleanup guards | Retained separate implementation; not the direct Audimax Map flow |
+| Session/rehearsal | Older hardware session view, independent simulated charging and multi-car lab | No measured energy or real payment; the pulled Audimax hold is not linked to the older session route |
+| Privacy controls | Local profile export/deletion, owner cloud export and pending-review erasure intake | Provider data and operating obligations are separate; GDPR compliance is not established |
 
-## Vocabulary and reservation resources
-
-A **location** is a site on the map. A **bay** is a physical space for one vehicle. A **connector** is an individually identified plug associated with a bay. Two plugs can serve the same vehicle space, so a registered bay with CCS and Type 2 still has capacity for one vehicle. Selecting either connector reserves the whole registered bay.
-
-GoingElectric reports aggregate groups such as “4 × CCS, 150 kW.” That is enough to display four **listed app slots**, but does not identify four particular physical bays. BayReady permits a separate software hold on each such virtual slot, initially unreserved when a successful database read finds no active hold. It does not fabricate a physical bay assignment. The UI must identify these as app reservations and keep physical availability unverified.
-
-These are two allocation domains:
-
-| Domain | Resource locked | How inventory is established |
-| --- | --- | --- |
-| Registered bay | Whole one-vehicle bay, regardless of selected connector | Administrator-approved location/bay/connector rows |
-| Directory app slot | One stable virtual slot within a listed connector group | Device derives a key from the current directory listing; database stores only booking references |
-
-A virtual slot is not automatically linked to a registered bay or Ecurious lock. Before moving to physical guarantees, the operator must supply that mapping and reconcile existing virtual holds. The two domains do not currently exclude each other across an unconfigured mapping.
-
-## Architecture and trust boundaries
+## Architecture and allocation domains
 
 ```mermaid
 flowchart TB
-  subgraph Phone[Android device - Expo Go]
-    UI[Expo Router screens]
-    Profile[Local profile provider]
+  subgraph Phone[Expo mobile app]
+    Map[Map and charger discovery]
+    Demo[Audimax reservation modal]
+    Events[Munich events demo]
     Shared[Shared booking clients]
-    Map[Native map and directory client]
-    Store[SecureStore profile and guest session]
-    UI --> Profile
-    UI --> Shared
-    UI --> Map
-    Profile --> Store
-    Shared --> Store
+    Profile[Driver profile and privacy]
+    Local[(SecureStore profile and Audimax hold)]
+    Map --> Demo
+    Map --> Events
+    Map --> Shared
+    Profile --> Local
+    Demo --> Local
   end
-  Map -->|Direct HTTPS - registered directory key| GE[GoingElectric directory]
-  Map --> Basemap[Native basemap provider]
-  Shared -->|Guest auth and authenticated RPCs| Cloud[Supabase - authenticated booking RPCs]
-  Cloud --> DB[(PostgreSQL app holds and registered inventory)]
-  UI -->|LAN HTTP - rehearsal and diagnostics| Node[Local Node server]
-  Browser[Original browser rehearsal] --> Node
-  Node --> Sim[In-memory simulator]
-  Node --> Adapter[Read-only Ecurious adapter]
-  Adapter -->|HTTPS GET and guarded POST - backend key| Hardware[Ecurious challenge service]
-  Node -->|Caller JWT for intents - private key for worker claims| Cloud
+  Map -->|Direct device request and directory key| GE[GoingElectric directory]
+  Map --> Basemap[Native basemap]
+  Demo -->|Direct HTTPS GET and POST with demo API key| Ecurious[Ecurious challenge service]
+  Ecurious --> Rig[Assigned test barrier and camera]
+  Shared -->|Guest or email JWT and RPC| Supabase[Supabase Auth and PostgreSQL]
+  Older[Separate Hardware and Session screens] -->|LAN owner intents| Node[Node server]
+  Events -->|LAN GET /api/events| Node
+  Node -->|HTTPS GET and private bearer token| Eventbrite[Eventbrite organization or curated events]
+  Node -->|Private worker state| Supabase
+  Node --> Adapter[Guarded Ecurious adapter]
+  Adapter -->|GET and guarded POST| Ecurious
+  Rehearsal[Reserve and Scenario lab screens] --> Node
+  Node --> Simulator[Independent fictional lifecycle]
 ```
 
-The Node server does not proxy GoingElectric and does not mediate the Supabase booking RPCs. Directory/demo holds do not call the Ecurious adapter. Enrolled hardware bays use a separate durable command ledger on the backend. The app may therefore browse listings while cloud booking is unavailable, and a hardware read failure does not mutate an application reservation.
+There are four distinct reservation domains. A booking in one does not create a booking in the others.
 
-| Fact | Authority | What must not be inferred |
+| Domain | Resource and authority | Persistence and physical effect |
 | --- | --- | --- |
-| Station name, listed plug count/type/power and reported fault | GoingElectric response and retrieval time | Vacancy, operator booking rights, or physical plug identity |
-| Active BayReady hold, owner and expiry | PostgreSQL transaction and database clock | Protection from drivers or apps outside BayReady |
-| Profile and preferred connector | This device's saved profile | Verified email/phone, authenticated vehicle or payment authorization |
-| Physical lock/occupancy observation | Fresh supported Ecurious telemetry | A command acknowledgement or an old report proves current safe state |
-| Simulator arrival/charging state | Local rehearsal state machine | Actual camera recognition or electricity delivery |
+| Direct Audimax demo | A selected API lock; local phone hold plus actual provider state | One SecureStore record on that phone; direct real barrier/whitelist commands |
+| Directory app slot | One virtual slot in a listed station/type/power group; Supabase transaction | Shared SQL hold; no control of the listed public charger or barrier |
+| Registered bay | Administrator-defined one-vehicle bay and one selected connector | SQL whole-bay allocation; Ecurious bays use the separate durable workflow |
+| Local rehearsal | One fictional Node bay, or independent multi-car lab world | Simulator memory; no physical commands or payment |
 
-## Components, tools and source map
+A **location** is a site. A **bay** is a space for one vehicle. A **connector** is a particular plug attached to that bay. Selecting either of two connectors serving the same bay still consumes one vehicle space.
 
-The mobile stack is Expo SDK 58, React Native 0.88, React 19.3, Expo Router and TypeScript. Native map rendering uses `react-native-maps`; foreground location uses `expo-location`. `expo-secure-store` stores native preferences and guest credentials, `expo-crypto` supplies request IDs and slot hashing, and `@supabase/supabase-js` supplies auth/RPC transport. The root server uses Node 24+ built-ins with no root runtime dependency installation. Database checks use an isolated PostgreSQL 17 Docker container.
+GoingElectric counts such as “4 × CCS” provide listed plug choices, not four verified physical bay identities. Directory slots use a station/type/power-derived opaque reference plus ordinal. They are not automatically mapped to Ecurious locks. The explicitly enrolled `lock-0002` uses a `BARRIER_TEST` interface at **0 kW**, without a GoingElectric station mapping or actual charger.
+
+## Screens and driver experience
+
+| Entry point | Behavior |
+| --- | --- |
+| First launch / `/profile` | Save local preferences or choose **Explore map first**; optional contacts and plate |
+| `/` and `/map` | Full-screen native map, public listings, Audimax marker and event entry point |
+| **Filters** | Minimum power, saved connector link, reported faults, reserved visibility, public chargers and optional fictional inventory |
+| Map location control | Request foreground location on demand and center the viewport |
+| Map **Bookings** | Shared current/upcoming directory holds and their deadlines |
+| Purple **Audimax TUM** marker | Live hardware cards, lock selection and **Reserve now or book ahead** |
+| **Events** | Load Eventbrite events or choose labelled demo events, inspect nearby suggestions, open the source event or select a map/hardware destination |
+| `/sign-in` | Guest/email identity and guest conversion; independent of the local driver profile |
+| `/hardware` | Separate authenticated Node/Supabase hardware workflow, diagnostics and owner actions |
+| `/session` | Separate older hardware booking or simulator session duration/details |
+| `/reserve`, `/activity`, `/simulation` | Original simulator, timeline/read diagnostics, and fictional multi-car lab |
+| `/privacy` | Profile export/deletion, cloud export and pending Ecurious erasure request |
+
+The current map starts around **TUM Munich** (`48.1488, 11.568`); it is not a detected user position. Panning exposes **Search this area**. Connector preference automatically filters directory results; minimum power stays a manual dropdown choice. Directory requests are aborted/sequence-checked when superseded, and station results remain in screen memory for about one hour. Attribution, retrieval time and source links remain separate from the native basemap attribution.
+
+Profile data is versioned and normalized, with name/email/phone/plate optional. Email/phone format validation is not verification. Payment is an enum such as demo card or wallet; no card number or CVV is collected. The direct Audimax demo uses the saved plate, or its built-in demonstration plate if none is entered. Set the intended fictional test plate before presenting so the camera demonstration and the displayed booking agree.
+
+## Direct Audimax hardware demo
+
+The pulled implementation is in [map.tsx](../mobile/src/app/map.tsx), [audimax-booking-modal.tsx](../mobile/src/components/audimax-booking-modal.tsx) and [audimax-lock-api.ts](../mobile/src/lib/audimax-lock-api.ts). This path does not call the Node booking routes or Supabase allocation functions.
+
+The phone lists assigned locks with `GET /api/v1/locks`, accepting either `locks` or `assignedLocks` in the response. `lock-0002` is preferred and labelled **ACTIVE DEMO**. Other assigned devices may be returned by the service; the selected challenge demonstration is `lock-0002`.
+
+| Action | Direct API sequence | Local result |
+| --- | --- | --- |
+| Reserve now | `POST /api/v1/locks/:id/lock`, then `POST /api/v1/locks/:id/whitelist` with `{plates:[plate]}` | Save active hold after both HTTP responses succeed |
+| Schedule ahead | Save arrival, raise time and expiry locally; run the same reserve sequence when raise time is reached | `scheduled` becomes `active` |
+| Extend | No additional hardware request | Add 30 seconds to local expiry; display €1 mock fee |
+| Vehicle detected | Periodic `GET /api/v1/locks` returns `carPresence: occupied` | `active` becomes `occupied`; stop unused-hold expiry |
+| Leave / no-show release | `POST .../whitelist` with `{plates:[]}`, then `POST .../unlock` | Clear local hold after release resolves |
+| Cancel a future local booking | No hardware request while it remains only scheduled | Clear local hold |
+
+The two movement POSTs contain no explicit JSON movement options in this direct client. The API key is supplied in the URL query. Success is determined by HTTP status; the client does not parse a movement acknowledgement body or wait for a newer matching sensor observation before displaying success. Consequently, the current “Barrier Raised” success copy means the command sequence succeeded at HTTP level. Actual barrier position comes from watching the rig and its separate reported status.
+
+### Timing and state
+
+| Policy | Audimax presentation demo | Shared/durable product workflow |
+| --- | --- | --- |
+| Reserve now | Free 30-second arrival hold | Free ten minutes |
+| Extend | +30 seconds / €1 mock | +ten minutes / €1 mock |
+| Schedule fee | €1 displayed; no collection | €1 mock, recorded in applicable server booking |
+| Protection lead-in | Arrival minus 30 seconds | Arrival minus ten minutes |
+| Initial unused deadline | Arrival plus 30 seconds | Arrival plus ten minutes |
+| Clock and scheduler | Device clock and React timer | Database time and backend reconciliation |
+
+`AudimaxActiveHold` stores `lockId`, `lockName`, raw `plate`, `reservedAt`, `bookingMode`, optional `startsAt`, `raiseAt`, `expiresAt` and `status`. Native persistence uses SecureStore key `bayready.audimax.active-hold.v1`; the web fallback is memory only. One record exists per app installation, rather than a shared booking calendar.
+
+The local states are `scheduled`, `active` and `occupied`; release removes the record. The timer ticks approximately once per second. While active, status is normally polled about every three seconds; while occupied, about every ten seconds. Reading provider status does not make an old provider timestamp new.
+
+Keep the Map mounted, foregrounded and connected during this demonstration. A phone timer is not a reliable background scheduler. Relaunch restores the stored hold, but cannot prove that a scheduled movement or cleanup ran while the app was suspended. Once occupied, this path waits for **Leave Bay**; it does not automatically complete the booking after a later vacant report.
+
+### Camera and plate access
+
+This demo installs a plate on the device whitelist and delegates automatic access to the Ecurious camera/device system. It does not call a custom YOLO model, poll `plate/latest` for entry authorization, or privately compare a scan in Node. Occupancy detection is a separate sensor fact; an occupied bay alone does not establish that the whitelisted vehicle entered.
+
+The whitelist is persistent device policy, without an application booking TTL. The phone clears it during its release sequence. Whitelist programming is not an injected OCR event. Actual recognition must be demonstrated with the provided camera/test infrastructure. The older backend workflow instead reads native latest OCR, privately matches it and requires device automatic access disabled. These are alternative entry controllers and must not be presented as one combined flow or allowed to compete over the same test lock.
+
+### Failure boundaries and concurrency
+
+The direct path trades durable orchestration for a short demonstration flow. Its limits are visible in the implementation:
+
+- Raising and whitelist installation are two requests, not an atomic operation. If whitelist installation fails after raising, no successful local hold is saved and there is no automatic compensating release.
+- Release attempts whitelist clearing first. An HTTP error from clearing is warned about and unlocking continues; success of unlocking therefore does not prove the plate policy was cleared. A network exception can stop the sequence earlier.
+- There is no explicit request timeout, idempotency token, committed dispatch permit or durable command ledger in this client. Scheduled attempts can run again while the local hold remains scheduled after failure; overlapping asynchronous work is not fenced by a database.
+- Local `busy` state reduces repeat taps but does not provide multi-device ownership. Another phone can operate the same lock or overwrite its whitelist. The direct local hold does not exclude competing Supabase or direct-device bookings.
+- SecureStore helpers swallow storage errors and stored JSON is cast rather than schema-validated. Displayed in-memory success is not proof that a hold can be restored after restart.
+- Raw upstream error text can be placed in UI errors or console warnings. The direct API path does not inherit the older backend adapter's projected responses, fixed error vocabulary or plate-log protections.
+
+These are recorded limitations and implementation priorities, not verified production guarantees. They explain why the retained durable allocation/worker design remains useful beyond the single-team demonstration.
+
+## Event discovery and nearby suggestions
+
+The Event planner now reads **`GET /api/events`** from Node. [eventbrite-events.mjs](../lib/eventbrite-events.mjs) sends backend-only bearer-authenticated GET requests to Eventbrite. Public city-wide event search is unavailable; the feed supports `EVENTBRITE_ORGANIZATION_ID` or up to ten comma-separated `EVENTBRITE_EVENT_IDS`. With neither selector, it discovers the token owner's organizations and automatically uses one only when exactly one is returned. Multiple organizations require explicit selection. The private token is `EVENTBRITE_PRIVATE_TOKEN`, with `EVENTBRITE_TOKEN` accepted as an alias.
+
+Organization requests use `time_filter=current_future` and `expand=venue`; curated requests retrieve each configured event with its venue expanded. Normalization includes only public listings (`listed:true`), `live`/`started` status, valid UTC start/end times with the end still future, an in-person venue with real coordinates within 50 km of TUM Munich, and an HTTPS Eventbrite source URL. Missing coordinates are rejected rather than replaced with a marker at zero. Attendance is **Not provided**; venue capacity is not converted into an expected crowd. Returned events are deduplicated, ordered by start and bounded to fifty.
+
+The response is `{configured, source:'eventbrite', scope, events, reason, fetchedAt}`. `scope` is `organization`, `curated` or `not_configured`; each event supplies `{id,title,subtitle,category,emoji,venue,address,latitude,longitude,date,expectedAttendance,url,startsAt,source:'eventbrite'}`. Human-readable dates use Berlin time; `startsAt` and `fetchedAt` are UTC instants. No token, organization membership details or raw provider error body is returned to the phone.
+
+Provider reads have a six-second per-request timeout, a 1 MiB body limit and redirect rejection. Concurrent feed reads share one in-flight load; Node caches its normalized result for sixty seconds. Organization retrieval is bounded to two pages. A configuration error, provider failure or empty eligible selection produces an empty event array and a fixed explanatory `reason`, without silently inserting samples. The supplied token was successfully verified with read-only requests on 24 October; its initial organization feed contained **zero eligible Munich events**. That is a dated observation, not a promise that the source remains empty.
+
+The mobile [events client](../mobile/src/lib/events-api.ts) validates the feed, bounds it to 500 KB/100 events and uses a twenty-second request timeout. [use-events.ts](../mobile/src/hooks/use-events.ts) loads when the modal opens, aborts superseded/closed requests and supports refresh. The UI labels **Eventbrite events**, source update time and **View on Eventbrite** separately from the charger suggestions. A configured empty feed stays empty until **Use demo events** is chosen. Missing configuration or a mobile request failure displays an explicit **Demo events** state; its seven fictional Munich samples never acquire an Eventbrite badge.
+
+[munich-events.ts](../mobile/src/lib/munich-events.ts) retains those seven **fictional event presets** spanning tech, sport, culture and concerts. Their dates, attendance figures and static nearby-charger examples are demonstration content, not verified operator inventory. Live Eventbrite events and the sample selection use the same nearby-charging ranker.
+
+Candidates combine the Audimax hardware card, currently fetched GoingElectric stations and static Munich examples. Haversine distance orders the nearest five; it is straight-line distance, not walking/driving distance, travel time or GPS ETA. Selecting a directory candidate opens the fetched station when present. Selecting a static example centers the map but does not create a booking or a real routing instruction. Selecting Audimax opens the existing direct hardware booking modal, whose timer and request behavior are unchanged by Eventbrite.
+
+Ranking code still substitutes one nominal free spot for some unknown directory availability and always supplies a demonstration Audimax candidate. Static examples contain invented counts. The updated UI calls them **nearby charging options**, states that app/demo counts do not prove physical vacancy, and labels Audimax **Barrier only / No charger attached**. The candidate model retains illustrative CCS/150 kW metadata internally; the event card now suppresses it for hardware and it is not a real charger fact. A production version needs genuine operator availability, explicit source labels and route/ETA integration; a real event listing does not establish reservable charging nearby.
+
+## Shared Supabase allocations and durable hardware
+
+The retained server-backed implementation is separate from the direct Map demo. [DATABASE.md](DATABASE.md) documents the exact tables, role grants, migration history and SQL contracts; [SCHEDULED-SESSIONS.md](SCHEDULED-SESSIONS.md) documents quotes, windows, mock refunds and session fields.
+
+Directory virtual holds use authenticated guest/email RPCs, a database clock, request UUIDs, allocation locks and uniqueness/interval rules. After a successful scoped read, a slot with no current hold is unreserved **in BayReady**. A stale or failed read means unknown. Owner cancellation is checked within SQL; other users receive resource/deadline facts without owner details. The client refreshes after mutations, including conflicts or uncertain responses. A changed directory group can orphan an older key; owned holds remain available for cancellation. Provider permission for cross-device derived booking references remains unresolved; hashing alone does not establish it.
+
+Registered inventory uses `charging_locations` → `bookable_bays` → `bay_connectors`. Selecting a connector records that choice while excluding the entire bay. Composite relationships prevent selecting another bay's connector. The fictional seed has multiple connector types sharing one vehicle space; it is opt-in on the map. Generic software inventory RPCs exclude real Ecurious bays.
+
+The older physical workflow stores enrollment, controls, observations, scheduled slots and operation history privately. Owner JWTs request intent; backend-only credentials claim work. A replaceable predispatch lease leads to a committed one-use dispatch permit, a single movement attempt, a durable acknowledgement and a strictly newer target observation. Unknown delivery stays quarantined because a delayed dispatcher could still send. Cancellation/no-show expiry retains the bay until confirmed cleanup. Conflicting same-time facts require a newer observation. These guarantees belong to this durable path, not the direct client above.
+
+Its phases include `idle`, `protect_pending`, `protecting`, `protected`, `entry_pending`, `entering`, `entry_open`, `release_pending`, `releasing`, `blocked` and `uncertain`. Current assignment, enrollment, allowlist, interlocks and observation preflight gate movement. Native OCR is privately matched using a stable backend HMAC key; accepted entry ends the unused-arrival timer, while occupied arrival and later vacant departure remain distinct observations. No-ACK recovery requires stopping dispatchers before privileged reconciliation. Details are in [HARDWARE-SETUP.md](HARDWARE-SETUP.md), [BAY-LIFECYCLE.md](BAY-LIFECYCLE.md) and [ECURIOUS-API.md](ECURIOUS-API.md).
+
+For a scheduled durable booking, protection is deferred until T−10; a compatible alternative at the same enrolled location can replace an occupied target. A full location can record a mock refund and suggest verified alternatives. These behaviors must not be claimed for the direct Audimax hold, which has no shared calendar, automatic same-location reassignment or server refund ledger.
+
+## Sessions, simulation and charging evidence
+
+The existing `/session` screen reads the older authenticated hardware slots/workflows or the simulator. It can show time since confirmed arrival, masked vehicle, connector, booking status, deadlines, extension information and available hardware facts. It does not read the direct Audimax SecureStore hold. A hardware presence duration is a parking/session duration, not electrical charging time.
+
+The Node simulator is independent of Supabase and real locks. It models reserve → fictional plate check → simulated charging → departure → release, including blocked bays, no-shows and recognition uncertainty. Its events are bounded in memory and reset/restart loses state. The separate multi-car lab uses three fictional drivers, seven guided cases, an accelerated clock and explicit command/sensor steps; it does not establish live multi-device hardware behavior. [MULTI-CAR-SIMULATION.md](MULTI-CAR-SIMULATION.md) distinguishes that rehearsal from actual isolated PostgreSQL concurrency tests.
+
+No payment processor, live charging power, delivered energy, charge-start integration or verified electrical session is provided for the barrier-only test rig. Any “Parked & Charging” wording in its prototype UI is illustrative. Agree with organizers how to demonstrate the charging stage when using barrier-only hardware, and label any simulated stage explicitly.
+
+## Identity, credentials and data handling
+
+The local profile and Supabase identity are different. Guest Auth creates an owner UID; optional email/password sign-in can convert that guest while retaining ownership. Signing into a different account changes owner scope. Profile contacts are not automatically an Auth account, and format validation is not verified identity. A lost guest session has no implemented recovery path.
+
+| Data or credential | Current handling | Important distinction |
+| --- | --- | --- |
+| Name, optional contacts, connector and mock payment | Local profile SecureStore | No automatic profile sync |
+| Direct Audimax booking plate | Raw plate in local active hold and HTTPS whitelist request | Sent directly to Ecurious; not HMAC-only in this flow |
+| Direct Audimax hardware credential | `EXPO_PUBLIC_AUDIMAX_API_KEY` in phone bundle and API URL query | Public client configuration is extractable; this is not a backend-only secret |
+| Launcher credential fallback | `AUDIMAX_API_KEY` or root `ECURIOUS_API_KEY` can populate the public Audimax variable | Removing the original environment variable does not undo this copied exposure |
+| GoingElectric key | Public Expo variable, direct device requests | Available to the device; provider app/usage terms still apply |
+| Supabase public key and guest/email session | Public app configuration plus native session storage | Public key is not ownership; JWT identity and SQL checks authorize bookings |
+| Supabase private key, access token and plate HMAC key | Backend/setup environment only | Not needed by the direct Audimax phone client |
+| Eventbrite private token and selectors | Backend Eventbrite adapter; all `EVENTBRITE_*` variables removed from Expo child environment | Bearer header only; no token in event URLs or feed responses |
+| Public Eventbrite event/venue facts | Bounded normalized Node cache and mobile feed state | Organization/curated selection, not global discovery; no attendee lists or ticket-purchase API |
+| Older hardware booking/scan plate | Transient Node matching; SQL keyed fingerprint/masked suffix | Different processing path from direct whitelist programming |
+| Directory catalog | Device memory, source attribution/time/link | No server catalog import; shared booking references are separate |
+| Cloud bookings and private operation history | Supabase SQL, scoped RPCs/private worker access | Retention and erasure fulfillment still require operator policy |
+
+The direct lock response type can include a whitelist and latest recognized plate metadata. The app does not need a separate AI model or camera-image archive to demonstrate access. The backend diagnostics projection is more restrictive than the direct fetch; its privacy guarantees must not be attributed to raw direct responses.
+
+Existing privacy export/deletion controls cover the local **profile** and specified owner cloud records. They do not export/delete the separate Audimax active-hold record or revoke its provider whitelist. Deleting a profile is therefore not a complete removal of direct-demo plate data. Provider camera/whitelist retention, notices, controller details, lawful basis, access/erasure fulfillment and credential rotation still need an operating policy. Ecurious is the intended operator; no GDPR compliance claim follows from SecureStore, hashing or an erasure-request button. See [PRIVACY.md](PRIVACY.md).
+
+## Source map, decisions and next steps
 
 | Source | Responsibility |
 | --- | --- |
-| [Root layout](../mobile/src/app/_layout.tsx) | Initial profile recovery, protected routes and state providers |
-| [Map screen](../mobile/src/app/map.tsx) | Viewport discovery, filters, selection, confirmation and hold display |
-| [Profile screen](../mobile/src/app/profile.tsx), [profile provider](../mobile/src/components/profile-provider.tsx) | Onboarding, local edit/save/recovery and skip-to-browse |
-| [Driver profile model](../mobile/src/lib/driver-profile.ts) | Versioned normalization and validation |
-| [Directory client](../mobile/src/lib/goingelectric-api.ts) | Direct requests, normalization, source links and fixed errors |
-| [Registered inventory helpers](../mobile/src/lib/map-inventory.ts) | Compatible plugs, site grouping and separate bay/plug counts |
-| [Booking client](../mobile/src/lib/bookings-api.ts) | Guest session, bounded transport, RPC calls and sanitized failures |
-| [Registered booking hook](../mobile/src/hooks/use-bookings.ts) | Foreground reads, serialized mutations and freshness |
-| [Directory booking hook](../mobile/src/hooks/use-directory-bookings.ts), [slot helpers](../mobile/src/lib/directory-slots.ts) | Scoped shared software holds and stable virtual identities |
-| [Simulator client](../mobile/src/lib/reservation-api.ts) | Local API addressing, request validation and mock state |
-| [Node server](../server.mjs), [simulator](../lib/simulator.mjs) | Local HTTP and deterministic rehearsal rules |
-| [Ecurious adapter](../lib/ecurious-adapter.mjs) | Credential boundary, projected reads and single-attempt movement commands |
-| [Hardware workflow](../lib/hardware-workflow.mjs), [private transport](../lib/hardware-store.mjs) | Fenced database claims, preflight, dispatch and read reconciliation |
-| [Migrations](../supabase/migrations/), [SQL tests](../supabase/tests/) | Durable app allocation rules and executable contracts |
-| [Launchers](../scripts/) | Environment filtering, LAN startup, inspection and checks |
+| `mobile/src/app/map.tsx` | Native discovery, shared booking UI and local Audimax scheduling/occupancy state |
+| `mobile/src/components/audimax-booking-modal.tsx` | Direct hardware Now/Schedule/Extend/Leave UI |
+| `mobile/src/lib/audimax-lock-api.ts` | Direct provider requests and local active-hold persistence |
+| `mobile/src/lib/munich-events.ts`, `mobile/src/components/munich-events-modal.tsx` | Fictional event candidates, distance ranking and selection |
+| `mobile/src/lib/events-api.ts`, `mobile/src/hooks/use-events.ts` | Validated Eventbrite feed reads, modal refresh and source state |
+| `lib/eventbrite-events.mjs`, `GET /api/events` in `server.mjs` | Private-token organization/curated event retrieval and bounded public projection |
+| `mobile/src/lib/goingelectric-api.ts`, `directory-slots.ts` | Direct directory normalization and virtual slot identities |
+| `mobile/src/lib/bookings-api.ts`, booking hooks | Authenticated shared allocation reads/writes |
+| `mobile/src/app/hardware.tsx`, `session.tsx` | Separate durable hardware owner UI and session projection |
+| `server.mjs`, `lib/hardware-workflow.mjs`, `lib/hardware-store.mjs` | Authenticated intents, durable commands and reconciliation |
+| `lib/ecurious-adapter.mjs` | Projected provider reads and guarded single-attempt movement methods |
+| `supabase/migrations/`, `supabase/tests/` | Allocation, permission, timing and concurrency contracts |
+| `lib/simulator.mjs`, multi-car simulation code | Repeatable fictional lifecycle and edge cases |
+| `scripts/mobile-environment.mjs`, launch scripts | Expo configuration, credential forwarding and LAN startup |
 
-## Screens and first use
+The useful design choices are direct device discovery, explicit separation of virtual slots from physical bays, whole-bay exclusion for multiple connectors, mock rather than real payments, and a simple accelerated hardware demonstration. The largest current integration gap is having two independent command controllers for one device and a direct demo whose ownership/timing does not survive other clients or a suspended app.
 
-| Route | Role |
-| --- | --- |
-| `/profile` | First-launch setup or profile editing |
-| `/` | Full-screen map after setup or an explicit skip |
-| `/map` | Compatible route to the map |
-| `/reserve` | Original local lifecycle simulator |
-| `/activity` | Simulator timeline and separate hardware diagnostics |
-| `/hardware` | Designated physical-bay intent, owner actions and command/observation states |
+After the demo, consolidate the working camera/whitelist behavior into one durable reservation owner; use server-side scheduling and narrow authenticated intents, explicit command outcomes and cleanup records. Add operator-owned bay mappings, shared contention handling, recovery for partial requests, source-labelled event availability, arrival reminders/ETA, payment/refund reconciliation, operating privacy controls and charger telemetry only when supplied. Keep the fast single-team rehearsal distinct until those contracts are implemented and tested.
 
-`ProfileProvider` loads before the normal routes. New users see setup and may choose **Explore map first**. A separate setup-seen marker remembers that choice without creating a profile. A valid saved profile also satisfies onboarding. A storage read failure offers retry or browsing; it does not replace unreadable values with defaults. Later retries preserve a mounted form and its draft.
+The [challenge workflow](CHALLENGE-WORKFLOW.md) covers all twenty guiding questions with concrete suggestions. Read its older backend-controlled camera sections with the controller distinction above: the pulled Map demo now demonstrates the whitelist alternative. No-shows have a visible 30-second demo; blocked-bay fallback belongs to the separate durable/lab paths; the Eventbrite planner connects actual source events to a proposed host use case while retaining labelled samples. Ticket/booking entitlement, sponsored charging and event-wide capacity guarantees are not implemented. Cross-app reservation APIs, OCPI/OCPP mappings and roaming/settlement are future integrations, not established compliance.
 
-The profile stores `version`, `name`, `email`, `phone`, `licensePlate`, `connectorType`, `paymentMethod` and `updatedAt`. Text is normalized; email is lowercased; phone requires an international `+` country code; plate formatting is normalized. Validation checks format and size, not identity. The profile's plate format is intentionally separate from the older simulator's narrower fictional-plate input.
-
-Supported saved preferences are CCS, Type 2 (`Typ2` in the directory API) and CHAdeMO. They automatically filter directory searches and registered connector choices. Minimum power remains a manual map dropdown value; returning from profile editing retains that screen state. Mock payment is a fixed demo card or wallet choice, without a card-number/CVV form.
-
-A complete saved profile is a mobile UI prerequisite for a new hold. Existing owned holds remain cancellable without one. Profile completeness is not a database authorization rule: RPC ownership comes from the Supabase guest session.
-
-## Discovery and map flow
-
-1. Start at an explicitly configured Berlin viewport; it is not a detected position.
-2. Fetch GoingElectric for the viewport, saved connector and minimum power directly from the device. Panning exposes **Search this area** rather than starting an unbounded request stream.
-3. Normalize records, reject malformed coordinates and source links, deduplicate station IDs, and retain source attribution, retrieval time and the entry link.
-4. Read shared app holds for the displayed station IDs. Only a fresh successful response allows a missing hold to mean unreserved in BayReady.
-5. Display compatible choices and app reservation counts. Reported faults and reserved resources have explicit dropdown controls; fictional registered inventory is opt-in.
-6. A tap on the location button requests foreground location and centers the map. It does not run background tracking or automatically reserve anything.
-
-Directory results live only in screen memory for about one hour, with periodic and foreground expiry checks. They are not copied into PostgreSQL or a Node cache. Old requests are aborted and sequence-checked so a late response cannot replace a newer search. Large/partial areas ask the user to zoom/search again instead of claiming all chargers have been returned.
-
-The native basemap's required attribution remains visible. GoingElectric attribution is separate. Bounds and padding keep floating controls and detail sheets clear of basemap credits. There is no embedded advertising website.
-
-## Listed plug reservation flow
-
-The product default is initially **unreserved in BayReady**, not a claim that every physical charger is empty. There is no need to insert every public plug into an inventory table before use: the successful hold query is the allocation overlay.
-
-Identical type/power groups at a station are merged before numbering, making the virtual identity independent of directory group ordering. A versioned station/type/power hash prefix plus a one-based ordinal produces the opaque slot key. No station name, address, coordinates, connector catalog or profile values are sent with the hold. A changed type, power or count may leave an earlier key unmatched; owned unmatched holds remain visible for cancellation.
-
-```mermaid
-sequenceDiagram
-  actor Driver
-  participant App as Expo app
-  participant Auth as Supabase Auth
-  participant DB as Booking RPC and PostgreSQL
-  App->>Auth: Restore guest session or anonymous sign-in
-  App->>DB: Read active holds for viewport station IDs
-  DB-->>App: Database time and projected holds
-  Driver->>App: Choose listed plug and Reserve
-  App-->>Driver: Masked vehicle, mock payment, hold duration
-  Driver->>App: Confirm
-  App->>DB: Station ID, slot key, duration, request UUID
-  Note over DB: Lock allocation, reconcile old expiry, insert one hold
-  alt Slot is unreserved
-    DB-->>App: Held reservation and server deadline
-  else A competing request won
-    DB-->>App: PLUG_RESERVED
-  end
-  App->>DB: Re-read after either result
-  DB-->>App: Current shared holds
-  App-->>Driver: Confirmed hold or refreshed conflict
-```
-
-Public map bookings offer Now/free ten minutes, Add ten minutes/€1 mock, and calendar Book ahead/€1 mock. Scheduled software protection starts ten minutes before arrival; future owner bookings are restored separately from current hold overlays. A request UUID identifies one operation; reusing it with the same station/slot/duration returns the original reservation and deadline. Reusing it with different parameters fails. A new deliberate user attempt uses a new UUID. Automatic write retries are disabled because a lost response can follow a committed transaction.
-
-The database serializes competing writes to the same slot and additionally enforces one held row with a unique index. Other users learn that the slot is reserved, including its deadline, without receiving the owner's identity or reservation ID. Only the owning authenticated guest can cancel. Other phones refresh on the foreground polling interval; an immediate second write still fails atomically before its UI catches up. The list response also includes the caller's active holds outside the viewport so cancellation remains possible after panning.
-
-An RPC does not currently verify the supplied slot against an operator catalog. This is a cooperative prototype reference scheme; a modified client can invent keys or request many holds. Production needs enrolled resources, abuse controls and an operator-approved mapping rather than treating client-provided keys as trusted capacity.
-
-## Registered bay reservation flow
-
-Registered inventory is normalized as location → bay → connectors. The seeded test location is fictional Berlin inventory: A1 has CCS 150 kW and Type 2 22 kW; A2 has CCS 150 kW; A3 has Type 2 22 kW. Four plugs therefore represent three vehicle spaces. The seed has no GoingElectric ID or hardware link.
-
-The driver chooses location, bay and compatible enabled connector, then confirms a software hold. The reservation records the selected connector while locking the bay row. A composite foreign key ensures that connector belongs to the bay. A partial unique index ensures that choosing the other plug on the same bay cannot admit a second vehicle. Ecurious rows are excluded from the generic demo inventory API. They use the dedicated guarded hardware workflow described below; physical enrollment and verified movement remain pending.
-
-The hierarchy migration preserves previous IDs, owners, deadlines and idempotency history. Historic holds without a recorded connector get a disabled `UNKNOWN` placeholder; they do not acquire an invented physical plug assignment. See the [database design](DATABASE.md) for exact constraints and migration order.
-
-## Time, expiry and consistency
-
-Directory slots and demo-mode registered holds use database time. Their read projections treat only nonelapsed held rows as active. A later allocation/cancellation materializes expiry as necessary; a background job is not required to free an elapsed software hold for a new allocation. A row can therefore still say `held` historically while an availability projection correctly excludes it.
-
-```mermaid
-stateDiagram-v2
-  [*] --> held: successful allocation
-  held --> cancelled: owner cancels before deadline
-  held --> expired: database deadline elapsed and reconciled
-  cancelled --> [*]
-  expired --> [*]
-```
-
-The phone anchors its displayed countdown to the returned server time. Reaching zero only changes the display; a subsequent database read decides availability. A booking expiry neither proves physical vacancy nor permits barrier movement. Unlike a charger session, these simple software holds have no arrival, charging or overstay state. Hardware-backed holds have a separate recovery guard: they stay held beyond the deadline until physical cleanup is confirmed.
-
-| Policy | Current value | Meaning |
-| --- | --- | --- |
-| Shared booking foreground poll | 10 seconds | UI synchronization, not real-time delivery |
-| Shared booking read-age limit | 25 seconds | Disable writes on stale/unknown app state |
-| Supabase transport timeout | 8 seconds per fetch | Auth plus RPC/reconciliation may involve several fetches |
-| Directory request timeout | 10 seconds | Bounded discovery attempt |
-| Directory memory lifetime | About 1 hour | No persistent directory catalog |
-| Local simulator client timeout | 7 seconds | Local API connectivity policy |
-| Hardware upstream timeout | 6 seconds | Per upstream read, not a physical confirmation deadline |
-| Hardware display freshness | 60 seconds | Conservative app display policy, not a validated safety threshold |
-| Hardware worker observation policy | 5 seconds by default; administrator range 1–15 seconds | Fresh preflight required; not a provider interlock guarantee |
-| Predispatch worker lease | 30 seconds | Replaceable claim token only before dispatch; issued permits are never reclaimed |
-| Hardware worker / screen polling | 5 seconds | Worker reconciliation and foreground UI refresh |
-| Hardware screen read-age guard | 15 seconds | Disable stale UI actions |
-
-Booking hooks serialize reads and writes. After every mutation outcome, including rejection or timeout, they re-read server state. A failed refresh retains a last snapshot for context but marks it stale and disables actions. Backgrounding stops foreground work/refresh where implemented and invalidates write readiness. Changing the directory query scope also invalidates readiness until that new scope has been read successfully.
-
-## Separate local rehearsal lifecycle
-
-The Node simulator manages one in-memory `demo-bay-1`. It has no shared transaction or record link to either Supabase allocation domain. The simulator's events are newest first and capped at 40; resetting rotates its private plate-fingerprint key. This is useful for repeatable demonstrations of no-shows, blocked spaces and plate uncertainty.
-
-| Trigger | Reservation outcome | Rehearsal behavior |
-| --- | --- | --- |
-| Reserve empty bay | `awaiting-arrival` | Store masked plate and keyed fingerprint; establish deadline |
-| Low-confidence or mismatched arrival | `manual-review` | Entry stays unauthorized |
-| Matching observation with confidence at least 0.9 | `authorized` | Lower virtual barrier before setting simulated occupancy |
-| Start simulated charge | `charging` | Local state transition; no energy command |
-| Authorized vehicle departs | `completed` | Empty simulated sensor permits release |
-| Release while empty | Reservation removed | Raise virtual barrier |
-| Waiting hold expires while empty | Reservation removed | Reconcile and free the virtual bay |
-| Waiting hold expires while externally occupied | `expired-occupied` | Keep obstruction context; wait for clear sensor |
-
-Authorized/charging sessions do not expire as no-shows. An external block is a distinct occupancy source. Release while occupied fails. `expire`, `block`, `clear` and `reset` are scenario controls, not trusted hardware events. The local HTTP server has no user authentication and these controls are unsuitable for a public deployment.
-
-## Designated hardware workflow
-
-Read-only Activity diagnostics still project assignment, connectivity, provider observation time, permitted faults/telemetry and camera-policy counts. Raw plates, allowlist values and images remain omitted. The new `/hardware` screen calls authenticated Node booking routes; the phone never receives the Ecurious key or private database worker key.
-
-An operator enrolls a confirmed `bookable_bays` mapping in `hardware_controls`. Both `enabled` and `interlocks_confirmed` default false. The backend additionally requires explicit command activation and an assigned-lock allowlist. No real inventory is automatically seeded, and a directory slot cannot become a hardware command. See [HARDWARE-SETUP.md](HARDWARE-SETUP.md).
-
-Reservation admission locks the bay/control, creates a `booking_reservations` hold and queues protection in one transaction. A selected connector still allocates the whole physical bay. The generic demo reserve/cancel RPCs cannot bypass hardware cleanup; Ecurious rows are surfaced by the dedicated workflow API.
-
-```mermaid
-flowchart LR
-  Intent[Owner reservation intent] --> Queue[Durable queued operation]
-  Queue --> Claim[Fenced predispatch claim]
-  Claim --> Preflight[Assigned lock - fresh vacant stable observation]
-  Preflight --> Permit[Commit one dispatch permit]
-  Permit --> Command[One Ecurious POST]
-  Command --> Ack[Persist acknowledgement]
-  Ack --> Observe[Newer provider observation]
-  Observe --> Confirm[Confirm target or retain recovery guard]
-  Permit --> Unknown[Unknown delivery - operator quarantine]
-```
-
-The worker performs direct, bounded Ecurious reads. Before movement it requires a current team assignment, matching allowlist/mapping, confirmed integration configuration, stable barrier, vacant occupancy and no known/unknown fault condition. Protection additionally requires plate-triggered auto-access disabled: wildcard/specific-plate access cannot substantiate exclusive protection under the present local-profile-only design. This scheduled workflow does not mutate persistent camera access or permanent modes. Private whitelist adapter methods exist, but the worker keeps camera auto-access disabled and verifies recognition itself.
-
-A pending operation has a replaceable 30-second claim token. The database validates that token, current operation/mapping and observation again when issuing the dispatch permit. After a permit is committed, it is never leased or dispatched a second time. The worker checks observation age again after the permit response and before POST. If the permit request times out or the worker stops, it sends no new command and keeps recovery state. In-process serialization supplements the database claim; it does not replace cross-process locking.
-
-`raiseBarrier()` and `lowerBarrier()` send one documented POST with `cancelAutoLift:false`; they return an acknowledgement with `confirmed:false`. No automatic command retry occurs. A healthy response is persisted before confirmation is attempted. For an actual dispatched movement, confirmation requires both durable acknowledgement and a fresh target observation whose provider timestamp is strictly newer than dispatch. An already-correct fresh state can complete a claimed operation without issuing a movement. Occupancy observed after acknowledged entry can confirm the barrier while remaining explicitly unverified vehicle identity/charging.
-
-There is an external fencing gap the database cannot solve: a process could pause after its permit commits and before POST. A matching GET cannot prove that process will not resume and send late. Therefore dispatching/uncertain operations without a durable acknowledgement remain quarantined even if later reads match the target. Operator recovery requires stopping dispatchers/in-flight activity and reconciling the device; there is no automatic timeout-based reset or general app recovery button. No exactly-once hardware-delivery guarantee is claimed.
-
-Concurrent reads cannot overwrite newer stored observations. Contradictory facts with the same provider timestamp latch a conflict until a strictly newer sample arrives. A newer occupied sample prevents an older vacant preflight from obtaining a permit. Remapping an active bay is refused. Cancellation during dispatch records release intent and waits for the current operation rather than queuing a competing opposite command.
-
-The physical phases are `idle`, `protect_pending`, `protecting`, `protected`, `entry_pending`, `entering`, `entry_open`, `release_pending`, `releasing`, `blocked` and `uncertain`. App capabilities and ownership come from the database. The screen separately displays current sensor observations, booking deadline and operation phase. HTTP 202 is an accepted application intent, not proof of movement.
-
-The deadline reconciler requests cleanup for unused elapsed holds, but leaves their booking rows held until cleanup. Scheduled protection begins at arrival minus ten minutes and its unused deadline is arrival plus ten minutes, plus paid extensions. Before protection, current availability excludes the future booking, while interval constraints still reject an overlapping request. A timely accepted plate match records `entry_authorized_at` and exits both scheduled-slot and physical-booking unused timers; occupied arrival and later vacant departure remain separate observations. Release requires a fresh vacant observation and confirmed lowered barrier, or a safe already-lowered no-op. Occupied, stale, conflicting, faulty or uncertain states retain exclusivity. No fee is inferred from missing camera events. [BAY-LIFECYCLE.md](BAY-LIFECYCLE.md) covers implemented recovery and proposed product additions.
-
-The scheduled path adds private camera-to-booking correlation, guarded entry, newer occupied arrival and newer vacant departure, as described in [SCHEDULED-SESSIONS.md](SCHEDULED-SESSIONS.md). It polls native Ecurious latest OCR; a separate model is not required. A private token-authenticated [recognition event endpoint](API.md#private-recognition-service-handoff) remains optional for another trusted service. Hardware camera auto-access stays disabled, so the backend is the sole entry movement controller. Adapter whitelist setters exist but this flow does not call them; programming access is not injecting recognition. Actual charging evidence and a complete physical cycle remain unverified. The app polls rather than consuming SSE; public/dashboard event names still differ. Hardware interlocks and provider command timing remain mentor-confirmed requirements.
-
-## Identity, data handling and credentials
-
-The local driver profile and Supabase identity are separate. Anonymous sign-in creates an authenticated guest UID; a public API key alone is not that identity. Optional email/password sign-in reuses the same SDK and native session storage. A guest can verify an email and set a password while retaining its UID/bookings. Switching to an existing account changes UID and remounts booking screens to discard the old owner's caches. A lost guest session still cannot be recovered; phone verification and password-reset UX are not implemented.
-
-| Data | Storage/transmission | Current boundary |
-| --- | --- | --- |
-| Profile name, email, phone and full plate | Native profile SecureStore | No profile sync; final hardware booking sends only its plate transiently to Node |
-| Chosen account email/password | Supabase Authentication, via SDK | Email confirmation required; credentials are not included in booking requests |
-| Scheduled plate reference | Private SQL HMAC and masked suffix | Backend-only stable secret; raw plate discarded; camera comparison stays private |
-| Preferred connector and mock payment enum | Same local profile | Connector filters discovery; no processor or real card values |
-| Guest access/refresh session | Serialized, generation-indexed SecureStore chunks | Used by Supabase SDK; web fallback is memory only |
-| Application holds | PostgreSQL | Resource references, owner, status, times and request UUID |
-| Hardware guard/operation history | Private PostgreSQL tables | Selected observations, command/acknowledgement times, claim state and fixed reasons; no raw plates/images |
-| Directory station data | Device screen memory and direct provider requests | No directory catalog in Node or database |
-| Simulator plate | Request memory, then HMAC fingerprint and mask | No raw plate in simulator snapshots/events/logs |
-| Hardware key | Root environment and Node adapter | Excluded from Expo child environment and client code |
-| Directory/public Supabase configuration | Expo public environment | Available on the device; never put server credentials here |
-| Camera images/raw hardware plates | Private transient OCR matching only; no image fetch/storage | No raw recognition in public responses/logs; provider retention needs organizer agreement |
-
-Profile storage operations are serialized. Unreadable values are preserved; failed saves retain form inputs. Guest session chunks commit a new generation index only after all chunks are written, avoiding mixed refresh-token generations. These measures do not establish GDPR compliance, a retention policy or verified identity.
-
-Tables use RLS with direct client grants revoked. Narrow authenticated `SECURITY DEFINER` RPCs require `auth.uid()`, use a fixed empty search path and project safe fields. Inventory enrollment is administrator-only. Cancellation checks ownership inside the database. Root launchers remove hardware and privileged Supabase settings before starting Expo and reject secret/service-role client configuration. See the [configuration matrix](OPERATIONS.md).
-
-GoingElectric's registered-app, direct-device, attribution, retention and redistribution terms remain relevant. Persisting application booking references is a separate use from caching a catalog; the terms give no explicit exemption for hashes or derived IDs. Provider/mentor confirmation of this cross-device linkage remains an open integration question, not a claim of permission or compliance. Browsing directory data remains available without completing a profile or successfully authenticating to the booking service.
-
-## Design decisions and alternatives
-
-| Decision | Reason and consequence |
-| --- | --- |
-| Native map with direct device discovery | Fits Expo Go and directory retrieval terms; source data is independent of Node availability |
-| Separate directory slots from registered physical bays | Supports the requested shared plug holds without inventing physical topology |
-| No preimport of the directory | Own booking rows provide the overlay; names/coordinates/catalog stay at the source/device |
-| Allocate a whole registered bay | Multiple connectors do not imply multiple parking spaces |
-| Database transactions and uniqueness | Competing phones cannot both win even while their screens show old state |
-| Server deadlines and reconciliation | Phone clocks, pauses and lost responses do not create authority |
-| Guest auth separated from profile | Ownership works without uploading contact/plate information; recovery and abuse control remain work |
-| Local mock payment | Allows confirmation UX without financial handling |
-| Read-only hardware until contract is understood | Existing observations are insufficient to prove safe motion, arrival and charging |
-| Preserve Node rehearsal separately | Keeps edge cases repeatable while live integration is unfinished; no automatic shared lifecycle |
-
-## Verification, limitations and next stages
-
-The separate `/simulation` [multi-car lab](MULTI-CAR-SIMULATION.md) adds a bounded fictional world with independent drivers, bay owners, occupants and command observations. It imports timing/pricing policy but never calls the production database or hardware. Actual multi-owner concurrency/entry/cleanup behavior is separately exercised against the frozen PostgreSQL migrations. The [PDF workflow plan](CHALLENGE-WORKFLOW.md) maps each guiding question to concrete implementation steps and current evidence.
-
-The [privacy screen](PRIVACY.md) separates local-profile deletion/export from account rights. Contact fields and the local plate are optional; hardware booking requires the plate. Authenticated privacy RPCs export owner-only booking history and record idempotent pending-review erasure requests in a private RLS table; they never remove a physical guard or claim deletion has already happened. Ecurious is the intended operator. Controller notice/contact, lawful basis, retention/fulfillment, camera assessment and provider agreements remain operator work. Native provider OCR is primary; any [optional model](MODEL-INTEGRATION.md) needs a separate data-handling review.
-
-Executable evidence is in Node tests, mobile TypeScript checks, SQL contracts and the isolated database concurrency harness. [BUILD-LOG.md](BUILD-LOG.md) records counts, dated API observations, unsuccessful discovery/auth attempts and untested scenarios; [OPERATIONS.md](OPERATIONS.md) gives repeatable commands. Local PostgreSQL auth shims are not a hosted Supabase Auth/PostgREST test. An Android bundle export is not proof of touch behavior or physical hardware integration.
-
-The remaining deployment/integration order is:
-
-1. Use the guarded setup script to verify the hosted migration history and enabled sign-in. Configure the private backend worker key and enroll only the mentor-confirmed test bay. Verify RPC grants and competing-session behavior before enabling commands.
-2. Preview profile, map, permission prompts, dropdowns and sheets on Android Expo Go. Confirm source attribution remains visible at different screen sizes.
-3. Validate virtual-slot use with the data provider/mentors; get operator-assigned physical bay and connector identifiers for guaranteed reservations.
-4. Verify the guarded command workflow on the designated hardware, then complete one supervised cycle with trusted plate events, safe sequencing and agreed charging evidence. Record actual charging evidence agreed with organizers.
-5. Extend with authenticated accounts/recovery, quotas and abuse protection, retention/deletion, operator administration, monitoring and measured capacity/load tests.
-
-Scaling is a proposal, not an implemented claim: use operator-owned inventory and mappings, paginated/scoped availability, persistent hardware operations, background reconciliation and documented integration adapters. Directory-slot client claims, global registered-inventory reads, polling volume and unbounded booking history need explicit production policies. Interoperability may later use an agreed external contract; no OCPI/OCPP compliance, roaming interoperability or public-infrastructure control is claimed here.
-
-The proposed mission answers are short holds/no-show expiry and occupied-bay recovery. Fixed mock booking fees/extensions, calendar lead-in, automatic same-location fallback/refund suggestions and private plate-driven access are implemented. Real financial penalties, directions/ETA, reminders, payment settlement, operator escalation, live charging and production hosting remain future features. Guarded manual lock intents and physical cleanup orchestration are implemented locally, with activation and real movement verification still pending. Hypothetical fees and utilization inputs remain labelled assumptions in the [business model](BUSINESS-MODEL.md).
+The [business model](BUSINESS-MODEL.md) separates the current mock tariff from proposed operator subscriptions, sponsored bookings and paid reservation experiments. Measure recovered usable bay time and actual incremental charging contribution **after subtracting empty reservation time and operating costs**. Pricing, utilization uplift and ROI remain hypotheses; the business must not depend on penalty income or invented live availability.

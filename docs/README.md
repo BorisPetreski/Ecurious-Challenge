@@ -2,6 +2,17 @@
 
 Implementation snapshot: 24 October 2026. The source brief provides challenge requirements; it is not authorization to operate public infrastructure. The user has chosen an Android Expo app and shared application reservations. Physical integration is limited to the designated Ecurious hardware.
 
+## Presentation documents
+
+- [Simple README and quick demo](../README.md)
+- [Setup, environment and framework versions](SETUP.md)
+- [90-second live demo runbook](DEMO.md)
+- [Three-minute spoken pitch and judge questions](PITCH.md)
+- [Complete current architecture and data flows](SYSTEM-DESIGN.md)
+- [Business model and assumptions](BUSINESS-MODEL.md)
+
+The current primary demo is **Map → Audimax TUM**, using direct device commands and a thirty-second window. Eventbrite is integrated; the user chose labelled sample events for the presentation because the connected account returned no eligible Munich events. Older backend/durable workflow references describe separate features, not the direct map hold.
+
 ## Start here
 
 | Need | Read |

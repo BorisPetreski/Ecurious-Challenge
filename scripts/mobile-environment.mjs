@@ -7,7 +7,9 @@ export function isPublicSupabaseKey(value) {
   } catch { return false; }
 }
 
-/** Directory and Supabase publishable keys go to the phone. Server secrets never do. */
+/** Forward intended mobile config; Eventbrite and private database settings stay on Node.
+ * The Audimax hackathon path deliberately receives its separate direct-device key.
+ */
 export function mobileEnvironment(env) {
   const result = { ...env };
   const directoryKey = env.EXPO_PUBLIC_GOINGELECTRIC_API_KEY || env.GOINGELECTRIC_API_KEY || env.ELECTRIC_API_KEY;
@@ -17,7 +19,7 @@ export function mobileEnvironment(env) {
   delete result.GOINGELECTRIC_API_KEY;
   delete result.ELECTRIC_API_KEY;
   for (const name of Object.keys(result)) {
-    if (name.startsWith('SUPABASE_') || name.startsWith('BAYREADY_')) delete result[name];
+    if (name.startsWith('SUPABASE_') || name.startsWith('BAYREADY_') || name.startsWith('EVENTBRITE_')) delete result[name];
   }
   const supabaseUrl = env.EXPO_PUBLIC_SUPABASE_URL || env.SUPABASE_URL;
   if (supabaseUrl) result.EXPO_PUBLIC_SUPABASE_URL = supabaseUrl.trim();

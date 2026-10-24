@@ -34,3 +34,13 @@ test('Supabase mobile config accepts public credentials and removes management/s
   }
   assert.equal(isPublicSupabaseKey('sb_publishable_fictional-key'), true);
 });
+
+test('Eventbrite credentials and source configuration stay on the backend without changing Audimax forwarding', () => {
+  const original = { EVENTBRITE_PRIVATE_TOKEN: 'fictional-private-token', EVENTBRITE_TOKEN: 'fictional-alias',
+    EVENTBRITE_ORGANIZATION_ID: '123', EVENTBRITE_EVENT_IDS: '456,789', EVENTBRITE_FUTURE_PRIVATE_SETTING: 'private',
+    ECURIOUS_API_KEY: 'fictional-direct-demo-key' };
+  const env = mobileEnvironment(original);
+  assert.ok(!Object.keys(env).some(key => key.startsWith('EVENTBRITE_')));
+  assert.equal(env.EXPO_PUBLIC_AUDIMAX_API_KEY, 'fictional-direct-demo-key');
+  assert.equal(original.EVENTBRITE_PRIVATE_TOKEN, 'fictional-private-token');
+});

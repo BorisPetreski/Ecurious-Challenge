@@ -13,6 +13,9 @@ export interface MunichEvent {
   longitude: number;
   date: string;
   expectedAttendance: string;
+  source?: 'eventbrite' | 'demo';
+  url?: string;
+  startsAt?: string;
 }
 
 export interface EventChargingSpot {

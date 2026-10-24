@@ -4,6 +4,12 @@ Ecurious will operate BayReady, as specified by the user. Its exact legal entity
 
 Review date: **24 October 2026**. The [challenge workflow](CHALLENGE-WORKFLOW.md) question 10 addresses plates directly; questions 2, 6–9, 11–15 and 17–19 also introduce personal-data decisions.
 
+## Current pulled-demo scope
+
+The **Audimax map** flow added in `05b7986` differs from the older backend/HMAC path described below. It sends its test credential from the phone in provider query parameters and sends the selected raw plate directly to Ecurious's persistent whitelist. The local Audimax hold also retains that plate in SecureStore. Leaving/expiry attempts to clear the whitelist; the client can continue lowering after a non-success whitelist-clear response, so cleanup is not independently guaranteed. Existing profile/cloud export and erasure controls do not cover this additional local hold or delete provider-side records. Use fictional demonstration data; complete these scopes before a real-driver rollout. No GDPR compliance claim is made.
+
+Eventbrite uses a separate backend-only token, stripped from the Expo process. The app receives public event title, venue/coordinates, time and source URL; it sends no driver plate/profile to Eventbrite. The current integration performs event reads only and does not access attendees, buy tickets or create events. Sample events remain labelled. See [current system design](SYSTEM-DESIGN.md) and [API contracts](API.md).
+
 ## Legal basis for the implementation plan
 
 The GDPR requires purpose limitation, minimisation, limited retention and accountability; each processing purpose needs a lawful basis. Contract necessity and legitimate interests require their own assessment; a blanket consent checkbox does not establish a basis for all camera, account and reservation processing. Rights handling, privacy by design and appropriate security are also required. Relevant articles: 5–6, 12–22, 25 and 32. [Official GDPR text, EUR-Lex](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX%3A32016R0679).

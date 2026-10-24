@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ActionButton, ui } from '@/components/bayready-ui';
 import { palette } from '@/constants/bayready';
+import { useEvents } from '@/hooks/use-events';
 import type { AudimaxLock } from '@/lib/audimax-lock-api';
 import type { DirectoryStation } from '@/lib/goingelectric-api';
 import {
@@ -35,18 +36,21 @@ export function MunichEventsModal({
   onSelectSpot,
   onClose,
 }: MunichEventsModalProps) {
-  const [currentEvent, setCurrentEvent] = useState<MunichEvent>(
-    () => selectedEvent ?? MUNICH_MOCK_EVENTS[0]
-  );
-
-  const closestSpots = getTopClosestFreeChargingSpots(currentEvent, {
+  const feed = useEvents(visible);
+  const [demoChosen, setDemoChosen] = useState(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
+  const showingDemo = demoChosen || feed.snapshot?.configured === false || !!feed.error;
+  const events = showingDemo ? MUNICH_MOCK_EVENTS : feed.snapshot?.events ?? [];
+  const currentEvent = events.find(event => event.id === selectedEvent?.id) ?? events[0] ?? null;
+  const loading = feed.loading || (!feed.snapshot && !feed.error);
+  const closestSpots = currentEvent ? getTopClosestFreeChargingSpots(currentEvent, {
     audimaxLocks,
     directoryStations,
     directoryCounts,
-  });
+  }) : [];
 
   const handleChooseEvent = (event: MunichEvent) => {
-    setCurrentEvent(event);
+    setLinkError(null);
     onSelectEvent(event);
   };
 
@@ -56,10 +60,10 @@ export function MunichEventsModal({
         {/* Header */}
         <View style={styles.modalHeader}>
           <View style={ui.flex}>
-            <Text style={ui.eyebrow}>MUNICH EVENT EV ROUTING</Text>
-            <Text style={styles.modalTitle}>Events & Nearest Free Chargers</Text>
+            <Text style={ui.eyebrow}>{showingDemo ? 'DEMO EVENTS · MUNICH' : 'EVENTBRITE · MUNICH'}</Text>
+            <Text style={styles.modalTitle}>Events & Nearby Charging</Text>
             <Text style={ui.small}>
-              Pick an event in Munich to discover the top 5 closest available charging bays.
+              Choose an event and explore nearby charging options.
             </Text>
           </View>
           <Pressable accessibilityRole="button" accessibilityLabel="Close modal" onPress={onClose} style={styles.close}>
@@ -68,11 +72,26 @@ export function MunichEventsModal({
         </View>
 
         <ScrollView style={ui.flex} contentContainerStyle={styles.content} showsVerticalScrollIndicator>
+          <View style={styles.sourceNotice} accessibilityLiveRegion="polite">
+            <View style={styles.sourceRow}>
+              <Text style={styles.sourceTitle}>{showingDemo ? 'Demo events' : 'Eventbrite events'}</Text>
+              <Pressable accessibilityRole="button" disabled={feed.loading} onPress={() => { setDemoChosen(false); void feed.refresh(); }} style={styles.sourceAction}>
+                <Text style={styles.sourceActionText}>{feed.loading ? 'Refreshing…' : 'Refresh'}</Text>
+              </Pressable>
+            </View>
+            {loading ? <View style={styles.sourceRow}><ActivityIndicator color={palette.ink} /><Text style={ui.small}>Loading Eventbrite events…</Text></View> : null}
+            {feed.error ? <Text style={ui.small}>{feed.error}</Text> : feed.snapshot?.reason ? <Text style={ui.small}>{feed.snapshot.reason}</Text> : null}
+            {showingDemo ? <Text style={ui.small}>Seven fictional sample events. Dates, crowds and sample charger counts are demonstration data.</Text> : <Text style={ui.small}>Events from the configured Eventbrite organizer or curated selection. Charging availability is separate and unverified.</Text>}
+            {!showingDemo && !loading && events.length === 0 ? <Text style={ui.body}>No upcoming events with a mapped Munich venue were returned. Refresh later or explore the demo events.</Text> : null}
+            {!showingDemo ? <Pressable accessibilityRole="button" onPress={() => setDemoChosen(true)} style={styles.sourceAction}><Text style={styles.sourceActionText}>Use demo events</Text></Pressable> : demoChosen ? <Pressable accessibilityRole="button" onPress={() => { setDemoChosen(false); void feed.refresh(); }} style={styles.sourceAction}><Text style={styles.sourceActionText}>Show Eventbrite events</Text></Pressable> : null}
+            {!showingDemo && feed.snapshot ? <Text style={ui.small}>Updated {new Date(feed.snapshot.fetchedAt).toLocaleString('en-GB', { timeZone: 'Europe/Berlin' })} · Berlin time</Text> : null}
+          </View>
           {/* Horizontal Event Chips / Quick Selector */}
+          {currentEvent ? <>
           <View style={styles.section}>
-            <Text style={ui.label}>Select Munich Event</Text>
+            <Text style={ui.label}>{showingDemo ? 'Select demo event' : 'Select Eventbrite event'}</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.eventRow}>
-              {MUNICH_MOCK_EVENTS.map(event => {
+              {events.map(event => {
                 const isSelected = event.id === currentEvent.id;
                 return (
                   <Pressable
@@ -114,8 +133,10 @@ export function MunichEventsModal({
                 <Text style={styles.activeEventTitle}>{currentEvent.title}</Text>
                 <Text style={styles.activeEventVenue}>{currentEvent.venue} · {currentEvent.address}</Text>
                 <Text style={[ui.small, { color: palette.muted, marginTop: 2 }]}>
-                  Expected crowd: {currentEvent.expectedAttendance}
+                  Attendance: {currentEvent.expectedAttendance}
                 </Text>
+                {!showingDemo && currentEvent.url ? <Pressable accessibilityRole="link" onPress={() => { setLinkError(null); void Linking.openURL(currentEvent.url!).catch(() => setLinkError('The event page could not be opened. Try again.')); }} style={styles.sourceAction}><Text style={styles.sourceActionText}>View on Eventbrite ↗</Text></Pressable> : null}
+                {linkError ? <Text accessibilityLiveRegion="polite" style={ui.small}>{linkError}</Text> : null}
               </View>
             </View>
           </View>
@@ -123,9 +144,10 @@ export function MunichEventsModal({
           {/* Top 5 Closest Free Spots Section */}
           <View style={styles.section}>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-              <Text style={ui.label}>⚡ TOP 5 CLOSEST FREE CHARGING SPOTS</Text>
+              <Text style={ui.label}>⚡ NEARBY CHARGING OPTIONS</Text>
               <Text style={[ui.small, { color: '#2E7D32', fontWeight: '700' }]}>Sorted by Distance</Text>
             </View>
+            <Text style={ui.small}>Distance-ranked suggestions. App/demo slot counts do not prove live physical vacancy. Audimax is a barrier-only test rig.</Text>
 
             <View style={styles.spotsList}>
               {closestSpots.map((spot, index) => {
@@ -161,15 +183,15 @@ export function MunichEventsModal({
                           <Text style={styles.distanceText}>📍 {formatDistance(spot.distanceMeters)} away</Text>
                         </View>
                         <View style={styles.powerBadge}>
-                          <Text style={styles.powerText}>⚡ {spot.maxPowerKw} kW</Text>
+                          <Text style={styles.powerText}>{spot.isAudimaxHardware ? 'Barrier only' : `⚡ ${spot.maxPowerKw} kW`}</Text>
                         </View>
                         <View style={styles.freeBadge}>
-                          <Text style={styles.freeText}>✓ {spot.freePlugs} / {spot.totalPlugs} free</Text>
+                          <Text style={styles.freeText}>{spot.isAudimaxHardware ? 'Test hardware' : `${spot.freePlugs} / ${spot.totalPlugs} app/demo slots`}</Text>
                         </View>
                       </View>
 
                       <Text style={[ui.small, { color: palette.muted, marginTop: 4 }]}>
-                        {spot.connectorTypes.join(' · ')} {spot.network ? `· ${spot.network}` : ''}
+                        {spot.isAudimaxHardware ? 'No charger attached' : spot.connectorTypes.join(' · ')} {spot.network ? `· ${spot.network}` : ''}
                       </Text>
                     </View>
 
@@ -181,14 +203,16 @@ export function MunichEventsModal({
               })}
             </View>
           </View>
+          </> : null}
         </ScrollView>
 
         <View style={styles.footer}>
           <ActionButton
-            label={`Navigate to #1 closest spot (${formatDistance(closestSpots[0]?.distanceMeters ?? 0)})`}
+            label={closestSpots[0] ? `Show #1 nearby option (${formatDistance(closestSpots[0].distanceMeters)})` : 'Choose an event to explore chargers'}
             variant="primary"
+            disabled={!currentEvent || closestSpots.length === 0}
             onPress={() => {
-              if (closestSpots[0]) {
+              if (currentEvent && closestSpots[0]) {
                 onSelectSpot(closestSpots[0], currentEvent);
               }
             }}
@@ -234,6 +258,11 @@ const styles = StyleSheet.create({
   },
   closeText: { color: palette.ink, fontSize: 27 },
   content: { padding: 20, gap: 16 },
+  sourceNotice: { padding: 14, borderRadius: 12, gap: 8, backgroundColor: palette.soft, borderWidth: 1, borderColor: palette.line },
+  sourceRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  sourceTitle: { color: palette.ink, fontSize: 15, fontWeight: '800' },
+  sourceAction: { paddingVertical: 8, alignSelf: 'flex-start' },
+  sourceActionText: { color: '#25633E', fontSize: 13, fontWeight: '700' },
   section: { gap: 8 },
   eventRow: { gap: 8, paddingVertical: 4 },
   eventChip: {

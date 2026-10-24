@@ -1,61 +1,55 @@
-# Demo and pitch rehearsal
+# Three-minute BayReady pitch
 
-**Concept:** BayReady gives an arriving EV driver a reserved bay with a clear deadline and a useful recovery when the bay cannot be provided. The current depth is no-shows, blocked bays and trusted plate check-in. Show the difference between implemented software and observed physical evidence: the guarded hardware code exists, but no live barrier cycle or electrical charging has been verified. [CHALLENGE-WORKFLOW.md](CHALLENGE-WORKFLOW.md) turns all 20 guiding questions from brief pages 2–3 into concrete implementation suggestions and priorities.
+Use the current **Map → Audimax TUM** flow. Speak the six paragraphs below; stage directions are not spoken. The script is designed for about 2:35 of speech plus 25 seconds of taps and hardware observation. Rehearse once with a timer; let a teammate handle the plate/rig while you speak.
 
-## Three minute outline
+| Time | Display / action |
+| --- | --- |
+| 0:00–0:20 | Map and the driver problem |
+| 0:20–0:45 | Profile preference, filters, then a quick Events preview; label sample events |
+| 0:45–1:25 | Audimax → lock-0002 → reserve; teammate presents the matching test plate immediately; show barrier/occupancy |
+| 1:25–1:55 | Countdown/extension and scheduled controls; mention lab cases, then leave/clear the physical demo |
+| 1:55–2:40 | Buyer, proposed subscription, mock fees and pilot metrics |
+| 2:40–3:00 | Next step and closing promise |
 
-| Time | Show | Say |
-| --- | --- | --- |
-| 0:00–0:20 | Driver problem | “Knowing where a charger is does not mean the bay will be usable when you arrive.” |
-| 0:20–1:25 | Real discovery and full hardware cycle | Find a compatible charger, reserve the mapped bay, show the hardware response, matching plate event, agreed charging evidence, departure and completed release. |
-| 1:25–2:05 | No-show and blocked-bay recovery | Open the **Scenario lab** for clearly labelled accelerated fictional cases: wrong car, missed deadline, blocked target/fallback and full-site mock refund. Explain what prevents a stranded driver and how uncertainty reaches the operator. |
-| 2:05–2:35 | CPO value | “Bounded holds and fair expiry are intended to reduce reservation waste. We would measure idle reserved minutes and successful arrivals alongside actual charging utilisation.” |
-| 2:35–3:00 | Architecture and next step | Show the adapter boundary, actual limitations, and what another charging app/operator would need to integrate. |
+## Read-aloud script
 
-Use the organiser's actual pitch limit. Name any simulated steps explicitly. If live hardware is unavailable during the pitch, use a permitted earlier recording with its context and describe the limitation; it does not automatically replace the required hardware demonstration.
+> An EV driver can find a charger on a map and still arrive to find its parking space blocked. That uncertainty wastes the driver's time and can cost the operator a charging session. BayReady connects finding a charger with protecting its bay.
 
-## Rehearsal acceptance checks
+> Our mobile app shows real charging locations from GoingElectric. Drivers save a connector preference, filter by charging power and choose a plug. Event planning connects a visit with nearby charging options. We have an Eventbrite integration and clearly labelled sample events for demonstrating that journey.
 
-1. Happy path: reserve the free bay, expected plate arrives, access is confirmed, charging is evidenced, vehicle departs, booking ends, empty bay returns to the agreed state.
-2. No-show: reserve without arrival, advance the labelled demo clock, observe safe expiry. Confirm occupancy before physical actions in the real integration.
-3. Blocked bay: simulate an unrelated car; reservation is unavailable or flagged, driver gets an honest status, operator owns recovery. Demonstrate safe clearing and retry only if implemented.
-4. Plate uncertainty: a mismatched or stale built-in Ecurious observation requests no entry; demonstrate a corrected fresh scan or explain the operator fallback. Low confidence is a separate fictional-lab/optional-model case: the provider's latest-plate response has no confidence score.
-5. Timeout/stale status: explain what is confirmed and what is unknown. Do not describe a capability as implemented unless you tested it.
+> Here at Audimax, the app connects to Ecurious's real test barrier. I select our designated bay and reserve it. The app requests raising and registers the selected plate in the hardware whitelist, letting the onboard camera recognise the arriving vehicle. Reported occupancy stops the unused-reservation countdown. At departure, Leave Bay clears the whitelist and requests lowering. This rig demonstrates access control; it does not deliver electricity.
 
-The [multi-car rehearsal](MULTI-CAR-SIMULATION.md) uses a separate fictional world. Its `race` scenario shows deterministic competing requests, not simultaneous hosted database writes. The `plate-check` scenario distinguishes a match, entry intent, acknowledged command and later physical observation. Do not present green scenario checks as proof of built-in camera accuracy or a real hardware cycle.
+> We compress the arrival window to thirty seconds for this demonstration. Without an arrival, the app releases the hold. Drivers can extend it for a mock one-euro fee or schedule ahead. Our separate multi-car lab demonstrates wrong-car arrivals, competing requests, blocked bays, fallback and refunds. The wider prototype also includes shared Supabase bookings, account access and privacy controls.
 
-## Current reservation policy
+> Our buyer is the charging operator, retailer, hotel or event host that wants more successful charging visits. Our starting business proposal is twenty-nine euros per equipped bay per month, with hardware and installation quoted separately. A four-bay site would pay one hundred and sixteen euros monthly for software. Driver fees are experiments, and today's payments are simulated. We want revenue from useful, reliable access, rather than dependence on penalties.
 
-- **Now:** ten minutes free.
-- **Schedule:** €1 mock. For arrival at 15:00, protection begins no earlier than 14:50 and the unused deadline is 15:10.
-- **Add ten minutes:** €1 mock, with the new deadline confirmed by the server and conflicts rejected atomically.
-- A timely trusted match stops unused-hold expiry. Actual arrival/departure need separate occupancy evidence; release waits for safe cleanup.
-- A blocked requested bay can switch to a compatible physical bay at the same location before activation. A full site cancels and records a mock refund, with verified alternatives offered separately.
+> Next, we connect the working hardware demo to shared booking ownership and reliable server-side scheduling. We pilot with one operator site, measuring successful arrivals, blocked arrivals, empty reserved minutes and net charging contribution. BayReady's promise is simple: find a charger, protect the bay, arrive with confidence.
 
-Public directory holds are shared software slots; they do not move barriers or prove vacancy. The hardware rules require an explicitly enrolled test bay. Mock fees are not real payments. For the exact contract, see [SCHEDULED-SESSIONS.md](SCHEDULED-SESSIONS.md).
+## Presenter notes
 
-## Business hypothesis to validate
+- Present the matching plate immediately after reserving; the demo hold is only thirty seconds. Keep Map foreground throughout. If necessary, use the extension button and explicitly call its fee mock.
+- If Eventbrite is configured but returns no matching events, choose **Use demo events** and say those are sample events. Do not present sample dates or attendance as real schedules.
+- Public directory listings and shared app holds do not establish real-time vacancy or control public infrastructure. Only the designated Audimax rig is the physical demo.
+- The new Audimax hold is local to the phone. The older Supabase/Hardware workflow supplies separate database-backed booking/session features. Do not claim the direct demo already has their cross-user allocation guarantees.
+- This path uses native camera whitelist access, not an external YOLO model or app-side latest-OCR comparison. Check what the actual arm/sensor does; HTTP success alone does not prove movement.
+- The stage proof is bay access. Charging power/energy and payments are not live. The new direct-map path has no dedicated charging-duration screen.
 
-The [full business model](BUSINESS-MODEL.md) explores commercial experiments separately from the implemented mock tariff above: a sponsored/credited reservation, operator subscription and paid reservation offer. These are alternatives for a later pilot, not additional app charges or settled Ecurious prices. The user identifies **Ecurious as the intended operator**; the exact commercial agreement is not supplied.
+## Short answers for the judges
 
-No automatic extra no-show penalty is implemented. Before introducing one, require reliable service/arrival evidence, disclosed terms, operator-failure waivers and review of ambiguous recognition. A missed plate event alone cannot establish a fair charge. The older business model's hypothetical penalty, credit and subscription figures are assumptions to validate, not this demo's billing rules.
+**Who pays?** Our proposed buyer is the CPO/site host. €29 per equipped bay/month is a price hypothesis; hardware and installation are separate. Driver fees are an experiment, with mock amounts in the app.
 
-The illustrative conservative case loses **€11.72/bay/month excluding penalties** and needs about **66.68 recovered usable bay-minutes/day** to break even at its other assumptions. Select sites and prices through a pilot; do not claim observed uplift or general profitability. A retailer could sponsor the service where measured additional retail contribution justifies it.
+**Does this improve utilisation?** That is a pilot question, not a measured result. Compare recovered usable minutes with empty reserved minutes and actual site charging contribution. The illustrative base model is about **−€11.72/bay/month**, with break-even near **67 recovered usable minutes/day** under its assumptions. We will choose viable sites and pricing rather than claim universal ROI. [Full model](BUSINESS-MODEL.md).
 
-Track successful check-ins per booking, no-show rate, blocked-arrival rate, reserved idle bay-minutes, and charging minutes divided by available bay-minutes. Compare against a baseline; reservations could lower utilisation if they keep bays empty for too long.
+**What if nobody arrives?** The foreground demo timer expires and invokes whitelist cleanup/lowering. The thirty-second schedule is accelerated. The broader product policy is a ten-minute window; production timers need server ownership.
 
-For a transparent scenario: 20 recovered minutes of charging at an assumed average 50 kW is about 16.7 kWh. At an assumed €0.10 contribution per kWh, that is about €1.67 contribution before hardware and operating costs. Every input is illustrative; no uplift has been measured by this starter.
+**What if a bay is blocked or another driver books it?** The scenario lab demonstrates blocked-bay/fallback/refund behavior, and the separate database flow provides atomic allocation. The direct phone demo has no shared hardware ownership ledger yet; connecting those parts is the next integration step.
 
-## Short answers to likely judge questions
+**What makes it different from a charger map?** BayReady connects discovery and arrival planning with physical bay protection and vehicle-specific access.
 
-**What is actually live?** Directory requests retrieve real listings; Supabase stores shared app bookings. The guarded command/plate workflow exists but activation and the physical cycle remain unverified. The scenario lab and original simulator are fictional, payments are mock, and real energy/charging telemetry is unavailable. Name every source separately.
+**How do plates work?** The direct demo sends the plate to the device whitelist. The hardware camera handles matching. Leaving/expiry attempts to clear access. Local profile data and the direct hold use phone storage. Explain the actual provider retention and cleanup scope; do not claim GDPR compliance.
 
-**What if the server times out?** Keep the result uncertain, read authoritative status, and reconcile before retrying a physical command. Explain the actual implementation, including any missing recovery.
+**Why events?** Events create a concrete arrival deadline and a venue buyer. The planner connects an event with nearby charging suggestions; its live feed uses accessible Eventbrite events, while its sample dataset remains labelled.
 
-**Can another app use it?** A documented reservation service and provider adapter are the path. Map stable station/EVSE/bay and booking IDs, authentication, event delivery, and ownership of state. Do not claim OCPI/OCPP compliance without an implemented, validated mapping.
+**Can it work with other operators?** The planned path is explicit location/bay/connector mapping, a shared booking API and provider adapters. OCPI/OCPP compatibility, other operators and production rollout have not been validated.
 
-**Do you need a custom AI model?** No. The existing worker privately polls Ecurious's built-in `GET /api/v1/locks/:id/plate/latest` and matches against the booking HMAC. The response has `plateType`, not confidence. A separate model has an optional private handoff but is not on the critical path. See [recognition integration](MODEL-INTEGRATION.md).
-
-**Why not just write the whitelist?** It changes persistent device auto-access and may lower the barrier; it does not create a timed booking or inject a camera observation. Our guarded worker requires auto-access disabled to keep one lowering controller. A future whitelist-controlled alternative would need durable policy ownership, revocation and uncertain-cleanup handling; existing HMACs cannot reconstruct the raw plate for later installation.
-
-**What happens to plates?** Explain local profile storage, transient Node matching, SQL HMAC/mask, and the separate provider camera system. Show the privacy screen's stated export/delete scopes. Ecurious must complete legal identity/contact, lawful-basis, supplier, camera-notice, retention and rights-fulfilment work. An erasure request is pending review, not deletion. [PRIVACY.md](PRIVACY.md) records controls and gaps; do not claim GDPR compliance from hashing or a demo checkbox.
+[Demo runbook](DEMO.md) · [Setup/frameworks](SETUP.md) · [System design](SYSTEM-DESIGN.md) · [All challenge questions](CHALLENGE-WORKFLOW.md)

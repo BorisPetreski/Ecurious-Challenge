@@ -1,12 +1,63 @@
 # API contracts
 
-This reference describes the checked-in implementation. There are three separate application data paths:
+This reference describes the checked-in implementation. The primary presentation flow is the direct **Map → Audimax** integration added in `05b7986`; its request and local-state contract is below. The longer-lived Node/Supabase reservation contracts remain separate.
+
+## Current Audimax map demo
+
+Source: [phone API client](../mobile/src/lib/audimax-lock-api.ts), [Map orchestration](../mobile/src/app/map.tsx) and [booking modal](../mobile/src/components/audimax-booking-modal.tsx).
+
+The phone calls the configured Ecurious HTTPS origin directly, using its assigned Audimax credential as the `apiKey` query parameter. The launcher maps `AUDIMAX_API_KEY` or `ECURIOUS_API_KEY` to `EXPO_PUBLIC_AUDIMAX_API_KEY`; this test credential is available on the device. No actual key belongs in this document or a recorded URL.
+
+| Method / provider path | Input | Current behavior |
+| --- | --- | --- |
+| `GET /api/v1/locks` | Assigned API key | Accepts `locks` or `assignedLocks`; supplies status, occupancy, camera, battery, signal and error cards |
+| `POST /api/v1/locks/:id/lock` | No JSON body | First step of Now activation; requests raising |
+| `POST /api/v1/locks/:id/whitelist` | `{ "plates": ["M-DEMO-42"] }` | Second activation step; registers the chosen plate for native camera access |
+| `POST /api/v1/locks/:id/whitelist` | `{ "plates": [] }` | First release step; attempts to clear automatic plate access |
+| `POST /api/v1/locks/:id/unlock` | No JSON body | Release lowering; also invoked by the foreground no-show timer |
+
+`reserveAudimaxLock` returns success after both HTTP responses succeed; it does not separately verify arm position. If whitelist registration fails after raising, no local hold is committed and no automatic rollback is issued. Release continues after a non-success whitelist-clear HTTP response, so an unlock response alone does not prove whitelist revocation. The direct client has no durable idempotency or cross-device allocation transaction. These are current contracts, not the stricter semantics of the older backend adapter.
+
+`AudimaxActiveHold` is stored locally with lock ID/name, raw selected test plate, reservation/arrival/raise/expiry times, mode and `scheduled | active | occupied` status. Now is thirty seconds; Scheduled raises at T−30 seconds and expires at T+30; extensions add thirty seconds for €1 mock. Reported occupied state stops unused-hold expiry; departure is explicit Leave Bay. Timers require the running Map screen. The hardware whitelist performs native optical matching; this path does not call `/plate/latest` or create a Supabase hardware slot.
+
+## Eventbrite event feed
+
+Source: [backend integration](../lib/eventbrite-events.mjs), [mobile client](../mobile/src/lib/events-api.ts), [feed hook](../mobile/src/hooks/use-events.ts).
+
+`GET /api/events` on the local Node origin returns:
+
+```ts
+type EventFeed = {
+  configured: boolean;
+  source: 'eventbrite';
+  scope: 'organization' | 'curated' | 'not_configured';
+  fetchedAt: string;
+  reason: string | null;
+  events: Array<{
+    id: string; title: string; subtitle: string;
+    category: 'tech' | 'sports' | 'culture' | 'concert'; emoji: string;
+    venue: string; address: string; latitude: number; longitude: number;
+    date: string; expectedAttendance: 'Not provided';
+    url: string; startsAt: string; source: 'eventbrite';
+  }>;
+};
+```
+
+The backend uses `EVENTBRITE_PRIVATE_TOKEN` (alias `EVENTBRITE_TOKEN`) as a Bearer header. Configure `EVENTBRITE_ORGANIZATION_ID`, provide up to ten comma-separated `EVENTBRITE_EVENT_IDS`, or let the integration discover a single accessible organization. It reads organization events with venue expansion or the configured individual events. Only public live/started, not-ended, in-person events with valid venue coordinates within 50 km of Munich reach the client. Dates display in Europe/Berlin; attendance is not invented.
+
+Provider reads have six-second per-request timeouts, response bounds, sanitized errors and a shared sixty-second cache. Expected configuration/provider failures return an empty feed with a reason, without forwarding credentials or provider bodies. There are no Eventbrite writes, ticket purchases or checkout operations. The launcher removes all `EVENTBRITE_*` variables from Expo's environment. The mobile client has a twenty-second bound and explicit refresh, empty/error states and **Use demo events**; sample events are never substituted as a successful live feed.
+
+Eventbrite retired unrestricted public event search. This integration is an organization/curated feed, not a search of every Munich event. [Official API reference](https://www.eventbrite.com/platform/new/api), [official changelog](https://www.eventbrite.com/platform/docs/by-date).
+
+## Other application data paths
 
 | Path | Authority and current status |
 | --- | --- |
 | Phone → local Node `/api/*` | One in-memory simulator, read-only diagnostics, and an authenticated designated-bay workflow. Physical commands default off; simulation writes remain separate. |
 | Phone → Supabase Auth and RPCs | Prepared shared software holds for registered demo bays and separate directory-derived virtual app slots. Hosted migrations and anonymous/email Auth are configured; no fallback booking is fabricated. |
 | Phone → GoingElectric | Direct directory lookup and on-device derivation of virtual app choices. A directory result does not establish a physical bay/plug identity, occupancy, or charging-session state. |
+| Phone → Ecurious directly | Current Audimax map demo: local hold, native plate whitelist and direct barrier requests; separate from Node hardware reservations |
+| Phone → Node → Eventbrite | Private-token organization/curated public event reads; separate from charger availability |
 
 These paths do not share reservation IDs or perform an atomic transaction across services. Directory/demo holds do not reserve the simulator bay or move an Ecurious barrier. Explicitly enrolled hardware bays instead use the durable command workflow below. See [database contracts](DATABASE.md), [Supabase deployment/setup](SUPABASE.md), and the [Ecurious provider contract](ECURIOUS-API.md).
 
