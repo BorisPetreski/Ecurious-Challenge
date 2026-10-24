@@ -4,6 +4,7 @@ import { networkInterfaces } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
+import { mobileEnvironment } from './mobile-environment.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 process.chdir(root);
@@ -52,7 +53,7 @@ function run(command, args, env, cwd = root) {
   return child;
 }
 
-console.log('BayReady mobile · simulated hardware and charging');
+console.log('BayReady mobile · simulated reservations and charging; separate read-only hardware diagnostics');
 console.log('Starting the demo API on your local network for Expo Go.');
 const backend = run(process.execPath, ['server.mjs'], {
   ...process.env,
@@ -88,7 +89,7 @@ if (!ready || stopping || backend.exitCode !== null) {
   console.log('Keep the phone and Mac on the same Wi-Fi. Scan the Expo QR code below.');
   console.log('Ctrl+C stops both Expo and the demo API.');
   run(process.execPath, [resolve(root, 'mobile/node_modules/expo/bin/cli'), 'start', '--go', '--lan', '--port', '8081', ...process.argv.slice(2)], {
-    ...process.env,
+    ...mobileEnvironment(process.env),
     EXPO_PUBLIC_API_PORT: apiPort,
   }, resolve(root, 'mobile'));
 }

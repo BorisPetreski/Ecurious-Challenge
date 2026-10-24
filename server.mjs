@@ -3,6 +3,7 @@ import { readFile, realpath, stat } from 'node:fs/promises';
 import { dirname, extname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createSimulator, DomainError } from './lib/simulator.mjs';
+import { EcuriousAdapter, EcuriousApiError } from './lib/ecurious-adapter.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const MAX_BODY_BYTES = 8 * 1024;
@@ -53,7 +54,7 @@ function isWithin(root, target) {
 }
 
 /** Exported for an HTTP smoke test without binding a production port. */
-export function createServer({ simulator = createSimulator(), publicDir = resolve(ROOT, 'public') } = {}) {
+export function createServer({ simulator = createSimulator(), hardware = new EcuriousAdapter(), publicDir = resolve(ROOT, 'public') } = {}) {
   return createHttpServer(async (request, response) => {
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader('Referrer-Policy', 'no-referrer');
@@ -66,12 +67,14 @@ export function createServer({ simulator = createSimulator(), publicDir = resolv
           json(response, 200, { healthy: true, mode: 'mock' });
         } else if (request.method === 'GET' && url.pathname === '/api/state') {
           json(response, 200, simulator.getState());
+        } else if (request.method === 'GET' && url.pathname === '/api/hardware') {
+          json(response, 200, await hardware.listLocks());
         } else if (request.method === 'POST' && url.pathname === '/api/reservations') {
           json(response, 201, simulator.reserve(await readJson(request)));
         } else if (request.method === 'POST' && url.pathname === '/api/actions') {
           json(response, 200, simulator.action(await readJson(request)));
-        } else if (['/api/state', '/api/health', '/api/reservations', '/api/actions'].includes(url.pathname)) {
-          const allow = ['/api/state', '/api/health'].includes(url.pathname) ? 'GET' : 'POST';
+        } else if (['/api/state', '/api/health', '/api/hardware', '/api/reservations', '/api/actions'].includes(url.pathname)) {
+          const allow = ['/api/state', '/api/health', '/api/hardware'].includes(url.pathname) ? 'GET' : 'POST';
           json(response, 405, { error: { code: 'METHOD_NOT_ALLOWED', message: 'This route does not support that method.' } }, { Allow: allow });
         } else {
           json(response, 404, { error: { code: 'NOT_FOUND', message: 'API route not found.' } });
@@ -117,7 +120,7 @@ export function createServer({ simulator = createSimulator(), publicDir = resolv
         response.destroy();
         return;
       }
-      if (error instanceof DomainError) {
+      if (error instanceof DomainError || error instanceof EcuriousApiError) {
         json(response, error.status, { error: { code: error.code, message: error.message } });
       } else {
         // Do not log request bodies, scanned plates or third-party error payloads.
@@ -140,10 +143,12 @@ export function start({ env = process.env } = {}) {
   if (!['127.0.0.1', 'localhost', '0.0.0.0'].includes(host)) {
     throw new Error('HOST must be 127.0.0.1, localhost, or 0.0.0.0.');
   }
-  const server = createServer();
+  const hardware = new EcuriousAdapter({ apiKey: env.ECURIOUS_API_KEY, baseUrl: env.ECURIOUS_BASE_URL });
+  const server = createServer({ hardware });
   server.listen(Number(rawPort), host, () => {
     const localHost = host === '0.0.0.0' ? '127.0.0.1' : host;
-    console.log(`Ecurious local simulator: http://${localHost}:${rawPort} (mock only; no live hardware connected)`);
+    console.log(`BayReady local API: http://${localHost}:${rawPort} (reservations and charging simulated)`);
+    console.log(hardware.configured ? 'Ecurious read-only diagnostics enabled at /api/hardware. Hardware commands remain disabled.' : 'Ecurious diagnostics need ECURIOUS_API_KEY in the backend .env.');
     if (host === '0.0.0.0') {
       console.log(`LAN simulator enabled on 0.0.0.0:${rawPort}. Expo Go can use http://<laptop-LAN-IP>:${rawPort} on the same network.`);
     }

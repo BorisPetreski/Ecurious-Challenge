@@ -1,6 +1,6 @@
 # BayReady mobile
 
-Expo SDK 58, React Native, Expo Router, and TypeScript. Android with Expo Go is the primary development target. Hardware and charging are simulated through the existing Node backend; no Ecurious credentials or live commands are implemented.
+Expo SDK 58, React Native, Expo Router, and TypeScript. Android with Expo Go is the primary target. Reservations and charging use the Node simulator. Activity also offers separate real, read-only Ecurious diagnostics; hardware commands remain unavailable.
 
 ## Run on your Android phone
 
@@ -32,13 +32,17 @@ The client normally derives the laptop's address from the Expo development URL a
 
 If automatic detection is unsuitable, copy `mobile/.env.example` to `mobile/.env` and set `EXPO_PUBLIC_API_URL` to the laptop's reachable API URL. Restart Expo after changing environment variables. The Activity screen's developer details show the selected address. A phone's `localhost` is the phone itself, so a physical Android device needs the laptop's network address.
 
-Variables beginning with `EXPO_PUBLIC_` are included in the app. Use them for addresses only; keep hardware authentication secrets on the backend. The Map tab displays the official GoingElectric website; the native reservation screen's station examples remain synthetic and clearly labelled.
+Variables beginning with `EXPO_PUBLIC_` are included in the app. Use them for public settings and the registered GoingElectric app key required for direct device requests. Keep Ecurious hardware authentication on the backend. Reservation screen station examples remain synthetic and clearly labelled.
 
 ## GoingElectric map
 
-Open the **Map** tab to browse the official [GoingElectric charging map](https://www.goingelectric.de/stromtankstellen/) inside the app. This is the original website in an Expo-compatible native WebView, so no GoingElectric API key is needed. Its search, filters, map gestures, and station pages belong to GoingElectric; source attribution stays visible. The native toolbar provides back, reload, and open-in-browser controls, with retry states for connection failures.
+Open **Map** for native charger markers and station details, without embedding the website. Root `npm start`, `npm run mobile`, `npm run android`, and `npm run ios` accept `ELECTRIC_API_KEY` or `GOINGELECTRIC_API_KEY` from the root `.env`. Starting Expo directly inside `mobile/` instead requires `EXPO_PUBLIC_GOINGELECTRIC_API_KEY` in `mobile/.env`. Never commit keys; restart Expo after changing them.
 
-The map needs an internet connection but does not depend on the laptop simulator API. Public stations are discovery only; reservations still cover the demo bay. The app does not scrape the website or extract its station records. A custom native map/data integration would use the documented API with approved credentials later. Website behavior, cookies, and any location prompts remain part of the GoingElectric browsing experience.
+The initial view is Berlin. Pan and zoom, then select **Search this area**. Power and connector filters refine searches; tapping a marker opens its address, connectors, power, network, reported faults, and a visible GoingElectric entry link. **My location** asks for foreground permission when tapped; declining still allows map browsing. Station faults are directory reports, not live availability. Public stations remain discovery only, without a link to reservable Ecurious hardware.
+
+Requests go directly from the phone to GoingElectric. Results are cleared after roughly one hour and rechecked on return to the foreground; source and retrieval time stay visible. The directory key is available to the device for these requests and must be registered for this app. The map needs internet but works independently from the simulator API. [API documentation](https://www.goingelectric.de/stromtankstellen/api/docs/) and [usage terms](https://www.goingelectric.de/stromtankstellen/api/terms/).
+
+`react-native-maps` and foreground `expo-location` are included in Expo Go. An independently built Android app needs a Google Maps SDK key/configuration; the GoingElectric directory key does not provide map tiles. [Expo map setup](https://docs.expo.dev/versions/latest/sdk/map-view/).
 
 ## Connection troubleshooting
 

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
 import { createServer, start } from '../server.mjs';
+import { EcuriousAdapter } from '../lib/ecurious-adapter.mjs';
 
 async function serve(t, options) {
   const server = createServer(options);
@@ -92,4 +93,59 @@ test('startup refuses unsupported bind hosts before listening', () => {
   for (const host of ['', 'example.com', '192.168.1.42', '::']) {
     assert.throws(() => start({ env: { HOST: host } }), /HOST must be 127\.0\.0\.1, localhost, or 0\.0\.0\.0/);
   }
+});
+
+test('hardware diagnostics are separate read-only data and never change simulator state', async t => {
+  const key = 'fictional-test-key';
+  let reads = 0;
+  const hardware = new EcuriousAdapter({ apiKey: key, clock: () => Date.parse('2026-10-24T09:00:00Z'),
+    fetchImpl: async (url, options) => {
+      reads++;
+      assert.equal(new URL(url).pathname, '/api/v1/locks');
+      assert.equal(options.method, 'GET');
+      assert.equal(options.headers['X-API-Key'], key);
+      return Response.json({ team: 'Demo team', locks: [{ id: 'lock-demo', name: 'Demo lock',
+        status: 'offline', carPresence: 'vacant', lastSeenAt: '2026-10-24T08:30:00Z',
+        activeErrors: ['MOTOR_LOWERING_STALL'], whitelist: ['DEMO123'],
+        latestPhoto: { timestamp: '2026-10-24T08:00:00Z', licensePlate: 'DEMO123', image: 'private-image' },
+      }] });
+    },
+  });
+  const base = await serve(t, { hardware });
+  const response = await fetch(`${base}/api/hardware`);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  const snapshot = await response.json();
+  assert.equal(snapshot.access, 'read-only');
+  assert.equal(snapshot.source, 'ecurious');
+  assert.equal(snapshot.locks[0].occupancy, 'unknown');
+  assert.equal(snapshot.locks[0].barrier, 'unknown');
+  assert.equal(snapshot.locks[0].lastReportedPresence, 'vacant');
+  for (const value of [key, 'DEMO123', 'private-image']) assert.ok(!JSON.stringify(snapshot).includes(value));
+  const write = await fetch(`${base}/api/hardware`, { method: 'POST' });
+  assert.equal(write.status, 405);
+  assert.equal(write.headers.get('allow'), 'GET');
+  assert.equal(reads, 1);
+  const state = await (await fetch(`${base}/api/state`)).json();
+  assert.equal(state.mode, 'mock');
+  assert.equal(state.reservation, null);
+  assert.equal(state.bay.id, 'demo-bay-1');
+});
+
+test('unconfigured and failed hardware reads leave simulator health and errors independent', async t => {
+  const unconfigured = await serve(t);
+  const empty = await (await fetch(`${unconfigured}/api/hardware`)).json();
+  assert.equal(empty.configured, false);
+  assert.deepEqual(empty.locks, []);
+
+  const hardware = new EcuriousAdapter({ apiKey: 'fictional-test-key', fetchImpl: async () => {
+    throw new Error('sensitive provider diagnostic');
+  } });
+  const failing = await serve(t, { hardware });
+  const response = await fetch(`${failing}/api/hardware`);
+  assert.equal(response.status, 502);
+  const error = await response.json();
+  assert.equal(error.error.code, 'ECURIOUS_CONNECTION');
+  assert.ok(!JSON.stringify(error).includes('sensitive'));
+  assert.deepEqual(await (await fetch(`${failing}/api/health`)).json(), { healthy: true, mode: 'mock' });
 });

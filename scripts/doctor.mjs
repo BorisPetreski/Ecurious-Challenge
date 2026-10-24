@@ -14,7 +14,7 @@ report(Number(process.versions.node.split('.')[0]) >= 24, `Node ${process.versio
 for (const file of ['package.json', 'server.mjs', 'public/index.html', 'public/app.js', 'lib/ecurious-adapter.mjs', 'source/challenge-brief.pdf']) {
   report(existsSync(resolve(root, file)), file);
 }
-report(!process.env.ECURIOUS_MODE || process.env.ECURIOUS_MODE === 'mock', 'Starter uses mock hardware; live mode requires on-site implementation');
+report(!process.env.ECURIOUS_MODE || process.env.ECURIOUS_MODE === 'mock', 'Reservations and charging remain simulated; Ecurious diagnostics are read-only');
 
 const port = Number(process.env.PORT || 3000);
 if (!Number.isInteger(port) || port < 1 || port > 65535) {

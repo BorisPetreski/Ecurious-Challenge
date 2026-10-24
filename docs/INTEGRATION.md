@@ -1,6 +1,6 @@
 # Coding and integration guide
 
-The primary application is now an Expo mobile app in `mobile/`, connected over HTTP to the existing in-memory Node simulator. The original browser demo remains in `public/`. The live Ecurious API is intentionally unimplemented because its documentation and credentials are supplied on site. The app must not report a physical action as complete on the strength of a UI click or an unconfirmed command response.
+The primary application is an Expo mobile app in `mobile/`, connected over HTTP to the in-memory Node simulator. The original browser demo remains in `public/`. A separate backend-only Ecurious adapter now provides real read-only hardware diagnostics in Activity. Reservation and charging writes remain simulated; live mode is unavailable. The app must not report a physical action as complete on the strength of a UI click or an unconfirmed command response. See [the actual API contract and observations](ECURIOUS-API.md).
 
 ## Architecture
 
@@ -9,12 +9,11 @@ flowchart LR
   Driver[Expo mobile UI] --> Local[Local Node reservation API]
   Browser[Original browser demo] --> Local
   Local --> Sim[In-memory simulator today]
-  Local -. Implement on site .-> Adapter[Ecurious adapter]
-  Adapter -. Documented API .-> Server[Ecurious test server]
+  Local -->|Separate read-only diagnostics| Adapter[Ecurious adapter]
+  Adapter -->|Authenticated GET only| Server[Ecurious test server]
   Server --> Bay[Reservation hardware and camera]
   Browser -->|Direct user-device request with approved key| GE[GoingElectric discovery API]
-  Driver --> WebMap[Official GoingElectric website in WebView]
-  Driver -. Custom native API integration pending .-> GE
+  Driver -->|Direct device request with registered app key| GE
 ```
 
 GoingElectric location/connector data and Ecurious bay occupancy have different sources. Add an explicit mapping from the mentor-confirmed station/EVSE/bay to the designated test hardware. Never enable reservations on arbitrary directory results merely because they appear nearby.
@@ -29,6 +28,7 @@ These are **this starter's endpoints**, not Ecurious endpoints. Successful write
 | --- | --- | --- |
 | `GET /api/health` | — | Local health and simulator mode |
 | `GET /api/state` | — | Bay, reservation, deadline, capabilities, redacted timeline |
+| `GET /api/hardware` | — | Separate read-only Ecurious assignment/telemetry; no raw plates or images |
 | `POST /api/reservations` | `{ "plate": "M-DEMO-42", "holdMinutes": 10 }` | Reserve the single simulated bay |
 | `POST /api/actions` | `{ "action": "arrive", "plate": "M-DEMO-42", "confidence": 0.99 }` | Simulated camera/arrival input |
 | `POST /api/actions` | `{ "action": "start-charge" }` | Simulated charging state only |
@@ -38,11 +38,15 @@ These are **this starter's endpoints**, not Ecurious endpoints. Successful write
 
 The simulator's authorization transition lowers its virtual barrier before recording authorized occupancy. Live command sequencing must follow the hardware's actual interlocks and the mentor's instructions.
 
+`GET /api/hardware` calls the supplied challenge service using `X-API-Key` from the backend environment. It projects permitted telemetry fields rather than forwarding upstream objects. Plate lists and photos are omitted; only camera-policy mode/count and recognition presence/time are returned. No key means `configured: false` with an empty lock list. Upstream failures return fixed, sanitized errors. Requests have a six-second timeout, a 1 MiB response limit, and reject redirects. `npm run hardware:inspect` uses this same adapter without starting the app.
+
+The local freshness window is 60 seconds, a display policy rather than a verified safety threshold. Offline, unknown, missing, future-dated or old telemetry never becomes current vacancy or barrier position. The mobile panel also ages out retained snapshots and marks state unknown after refresh failures. Service response time and the provider's `lastSeenAt` remain separate. The app does not consume SSE yet: a bounded probe received only `connected`, and the public reference disagrees with dashboard listener names.
+
 ## Implement the real adapter in this order
 
-1. Read `lib/ecurious-adapter.mjs`. Fill its command/status mapping from the supplied documentation; its method names are an internal boundary, not a claim about the provider API.
+1. Read `lib/ecurious-adapter.mjs` and `docs/ECURIOUS-API.md`. Authenticated list, individual status and redacted latest-recognition reads are implemented; reserve/release still refuse. These internal method names are not provider booking resources.
 2. Add server-side configuration for the documented URL, authentication, bay ID, and timeouts. Keep credentials out of browser bundles, logs, URLs, and tracked files. `npm start`, `npm run dev`, and `npm run doctor` load an optional `.env`; `.env.example` contains no credentials.
-3. Implement a read-only status call. Preserve unknown/stale state; attach observation time. Distinguish occupancy, barrier position, booking status, and charging evidence.
+3. Verify read-only diagnostics against reconnected hardware. Preserve unknown/stale state and observation time. Distinguish occupancy, barrier position, booking status, and charging evidence.
 4. Implement reserve/cancel or release using the **documented meanings**. Separate an accepted command from confirmed hardware state. After a timeout, reconcile status before retrying; use documented idempotency support where available.
 5. Consume the actual plate event feed. Validate its source, reject duplicate/out-of-order events, correlate bay and booking, and keep confidence/manual fallback visible. Do not expose the simulator's arbitrary `arrive` endpoint as a trusted live camera feed.
 6. Wire a live reservation service to the adapter; replacing the empty adapter file alone does not make the current simulator live. Remove the startup refusal only after the service, capabilities, UI labels, and event source are genuinely connected.
@@ -58,6 +62,8 @@ The simulator's authorization transition lowers its virtual barrier before recor
 - Charging evidence must come from the source agreed with organisers. “Start simulated charge” changes local state only.
 
 ## GoingElectric browser integration
+
+The mobile Map tab uses `react-native-maps` and `mobile/src/lib/goingelectric-api.ts` for direct viewport queries. Root launchers load the registered directory key from `.env` and pass only that key as `EXPO_PUBLIC_GOINGELECTRIC_API_KEY`; they remove the hardware key from the Expo child environment. The directory key is accessible on the phone and must stay out of tracked files and shared build artifacts. No directory data goes through the Node server. Native station data has a one-hour memory lifetime, visible source/time/entry links, and no reservation mapping. Optional foreground location centers the viewport only after a user tap. Expo Go supplies its native map setup; an independently built Android binary needs its own configured Google Maps SDK key, separate from both provider keys. [Expo map documentation](https://docs.expo.dev/versions/latest/sdk/map-view/).
 
 The optional UI uses `https://api.goingelectric.de/chargepoints/` with `key`, `lat`, `lng`, and integer `radius`. It renders `chargelocations` and their connector data. Keys are entered by the user, not baked into the repository. Directory results stay separate from the simulated bay. [Official API documentation](https://www.goingelectric.de/stromtankstellen/api/docs/).
 

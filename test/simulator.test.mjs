@@ -182,9 +182,9 @@ test('event history is bounded and reset replaces the simulated environment', ()
   assert.equal(reset.events[0].type, 'reset');
 });
 
-test('live adapter operations fail explicitly until a real integration is supplied', async () => {
+test('live adapter writes fail explicitly while reservations remain simulated', async () => {
   const adapter = new EcuriousAdapter();
-  for (const method of ['reserve', 'release', 'getStatus']) {
+  for (const method of ['reserve', 'release']) {
     await assert.rejects(adapter[method](), /not implemented/);
   }
 });

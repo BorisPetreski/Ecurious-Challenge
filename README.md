@@ -24,14 +24,19 @@ The mobile app uses Expo SDK 58, React Native, Expo Router, and TypeScript. It c
 
 ## Current behavior
 
-- Map tab displaying GoingElectric's official interactive website directly, without an API key.
+- Native charging map with GoingElectric stations, power/connector filters, and station detail cards.
 - Native reservation screen and activity timeline backed by the local simulator.
+- Separate read-only Ecurious hardware panel in Activity, using the backend's `.env` key.
 - Fictional station cards with one reservable demo bay.
 - Reserve, simulated plate check, simulated charging, departure, and release.
 - No-show expiry, blocked-bay scenarios, low-confidence recognition, and capability-driven controls.
 - Typed API client with bounded requests and polling while the app is active.
 
-All hardware and charging actions remain simulated. Real Ecurious integration is deliberately unimplemented and live mode refuses startup. The Map tab loads the official GoingElectric website in a native WebView, retaining its search, filters, source attribution, and station pages. A custom native map using GoingElectric's API remains future work and needs approved API access. Directory stations never automatically map to the designated Ecurious test bay.
+Reservation and charging actions remain simulated, and live reservation mode refuses startup. Real Ecurious reads show assigned hardware, connectivity, last-seen time, occupancy, faults, and camera access policy in Activity. Stale or offline reports show current physical state as unknown. No barrier commands or whitelist changes are exposed. The Map tab uses a native map with direct GoingElectric API requests, visible attribution, retrieval time, and station links. Directory stations never automatically map to the designated Ecurious test bay.
+
+Put the registered GoingElectric app key in the root `.env` as `ELECTRIC_API_KEY` (also accepts `GOINGELECTRIC_API_KEY`). Root launchers pass this directory key to the phone for direct requests. It stays out of tracked source; it is available on the end device. Restart Expo after key changes. Pan/zoom, tap **Search this area**, and tap a marker for connector and power details. **My location** requests foreground permission only when tapped. The initial view is Berlin, not a detected location. No website embed or website ads are loaded.
+
+Set `ECURIOUS_API_KEY` in the root `.env` and restart `npm start` to enable hardware diagnostics. The supplied challenge service is the default origin; `ECURIOUS_BASE_URL` can override it with an HTTPS origin. The key stays on the backend and is removed from the Expo child process environment. Run `npm run hardware:inspect` for the same redacted, read-only report in the terminal. See the [verified Ecurious API contract and observations](docs/ECURIOUS-API.md).
 
 ## Useful commands
 
@@ -46,6 +51,7 @@ All hardware and charging actions remain simulated. Real Ecurious integration is
 | `npm run check` | JavaScript syntax and native TypeScript checks |
 | `npm run mobile:doctor` | Expo project checks |
 | `npm run doctor` | Backend setup and available-port check |
+| `npm run hardware:inspect` | Read assigned Ecurious locks without sending commands or printing plates |
 
 The standalone browser demo is available at http://127.0.0.1:3000 while the API runs. Optional backend settings go in `.env`, copied from `.env.example`. Mobile address overrides go in `mobile/.env`, copied from `mobile/.env.example`. Both actual environment files are ignored by Git. Never place hardware secrets in an `EXPO_PUBLIC_` variable; those values are bundled into the app.
 
@@ -57,9 +63,10 @@ The standalone browser demo is available at http://127.0.0.1:3000 while the API 
 | `mobile/src/components/` | Shared mobile UI and state provider |
 | `mobile/src/hooks/use-reservation.ts` | Foreground polling and booking actions |
 | `mobile/src/lib/reservation-api.ts` | Typed client and API address selection |
+| `mobile/src/lib/goingelectric-api.ts` | Direct device directory requests and station normalization |
 | `mobile/app.json` | Expo app configuration |
 | `server.mjs` and `lib/simulator.mjs` | Local API and reservation rules |
-| `lib/ecurious-adapter.mjs` | Real hardware boundary to implement from supplied documentation |
+| `lib/ecurious-adapter.mjs` | Backend-only real hardware reads; writes deliberately unavailable |
 | `public/` | Original browser prototype |
 
 ## Team and submission references
@@ -67,6 +74,7 @@ The standalone browser demo is available at http://127.0.0.1:3000 while the API 
 - [Preparation plan and team formation](docs/TOMORROW.md).
 - [Architecture and integration guide](docs/INTEGRATION.md).
 - [Demo and pitch rehearsal](docs/PITCH.md).
+- [Business model: pricing, no-shows, blocked bays and unit economics](docs/BUSINESS-MODEL.md), with [editable assumptions](docs/business-model/assumptions.json) and [scenario results](docs/business-model/scenarios.csv).
 - [Build log and evidence checklist](docs/BUILD-LOG.md).
 - [Original challenge brief](source/challenge-brief.pdf) and [extracted text](source/challenge-brief.txt).
 
@@ -74,6 +82,6 @@ The repository is [BorisPetreski/Ecurious-Challenge](https://github.com/BorisPet
 
 ## Integration priorities
 
-Obtain the actual Ecurious API documentation, credentials, designated bay ID, status/event semantics, and accepted charging evidence. Connect one full real reservation cycle before adding extra features. A polished app is optional in the brief; a working hardware integration is required for top ranks.
+The updated key authenticated for team `E-Indifferent` and `lock-0001`. Initial hardware reads were offline with a lowering-stall error; a later report said raised/vacant without active errors, then aged beyond the display freshness window. Existing wildcard plate access remains configured. Ask the Ecurious mentors to confirm current connectivity, occupancy interlocks, relift behavior, specific-plate access, actual event delivery, and accepted charging evidence before enabling movement. Connect one full real reservation cycle before adding extra features. A polished app is optional in the brief; a working hardware integration is required for top ranks.
 
 Source references: [GoingElectric API documentation](https://www.goingelectric.de/stromtankstellen/api/docs/), [GoingElectric API terms](https://www.goingelectric.de/stromtankstellen/api/terms/), and [Expo documentation](https://docs.expo.dev/). Product defaults and hypothetical pricing remain proposals for the team.

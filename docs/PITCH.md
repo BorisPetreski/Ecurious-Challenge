@@ -24,7 +24,11 @@ Use the organiser's actual pitch limit. Name any simulated steps explicitly. If 
 
 ## Business hypothesis to validate
 
-Try a **€1 reservation fee credited toward charging** and a **€3 disclosed no-show fee**, waived when the operator cannot provide the bay or arrival cannot be determined reliably. These are pitch hypotheses, not market prices, implemented payments, or validated willingness to pay. A retailer could instead sponsor the reservation as a customer benefit.
+The [full business model](BUSINESS-MODEL.md) proposes a **€1 reservation line fully credited toward charging**, giving **€0 additional revenue**, funded by an assumed **€29/bay/month operator or host subscription** and separately quoted hardware. A sponsored €0 line is simpler if credit settlement is unavailable. A **€1.99 uncredited reservation fee** is a separate paid experiment, not an additional charge on the credited offer.
+
+Propose **up to €3 total for a reliably established no-show**, replacing any reservation fee, with a first-incident waiver and fair, justified terms. Operator failure, blocked bays and unresolved arrival evidence produce no reservation penalty. The ten-minute hold includes the grace period. None of these payments or commercial policies is implemented.
+
+The illustrative conservative case loses **€11.72/bay/month excluding penalties** and needs about **66.68 recovered usable bay-minutes/day** to break even at its other assumptions. Select sites and prices through a pilot; do not claim observed uplift or general profitability. A retailer could sponsor the service where measured additional retail contribution justifies it.
 
 Track successful check-ins per booking, no-show rate, blocked-arrival rate, reserved idle bay-minutes, and charging minutes divided by available bay-minutes. Compare against a baseline; reservations could lower utilisation if they keep bays empty for too long.
 

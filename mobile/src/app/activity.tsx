@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ActionButton, AppScreen, ConnectionNotice, SectionHeading, ui } from '@/components/bayready-ui';
 import { useBayReady } from '@/components/reservation-provider';
+import { HardwareStatus } from '@/components/hardware-status';
 import { palette, readable } from '@/constants/bayready';
 
 function eventTime(timestamp: string) {
@@ -23,6 +24,8 @@ export default function ActivityScreen() {
       </View>
 
       <ConnectionNotice />
+
+      <HardwareStatus />
 
       <View>
         <SectionHeading eyebrow="SHARED SIMULATOR" title="Latest activity" trailing={<Text style={styles.eventCount}>{events.length} events</Text>} />

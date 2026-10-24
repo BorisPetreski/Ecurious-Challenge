@@ -14,9 +14,9 @@ This is BayReady for the Ecurious WATT THE HACK challenge on 24 October 2026. Th
 
 ## Integration facts
 
-- All reservation hardware and charging in the prepared starter are simulated. The adapter throws until implemented from the actual on-site documentation.
+- Reservation controls and charging remain simulated. The backend adapter supports real read-only lock/status diagnostics; hardware writes still throw. Read `docs/ECURIOUS-API.md` for the observed contract and unresolved interlocks before adding commands.
 - Internal `/api/*` routes are not Ecurious API endpoints. Confirm reserve/release semantics, occupancy interlocks, status acknowledgements, and actual plate event delivery before wiring live behavior.
-- The mobile Map tab displays the official GoingElectric website directly in react-native-webview; no API key or scraping is used. Its directory badge is separate from the reservation simulator badge. The original browser demo also has an optional direct API request with an approved key. A custom native API integration remains pending; keep attribution, timestamps, per-station links, and separation from simulated stations when implementing it. Do not silently proxy or redistribute directory data.
+- The mobile Map tab uses react-native-maps with direct device GoingElectric API requests. Root launchers pass ELECTRIC_API_KEY (or GOINGELECTRIC_API_KEY) to EXPO_PUBLIC_GOINGELECTRIC_API_KEY; this directory credential is available on the phone, while ECURIOUS_API_KEY stays backend-only. Keep attribution, timestamps, per-station links, bounded memory retention, and separation from simulated stations. Do not proxy or redistribute directory data. The original browser demo retains an optional direct API request.
 - Directory station IDs do not automatically map to a reservable Ecurious bay. Only the designated hardware is part of the real demo.
 - Preserve explicit mock/live labels. The proposed mission areas are no-shows and blocked bays; confirm scope with the newly formed team and prioritize the real full cycle over extra features.
 - Keep secrets, raw plates, and camera captures out of tracked files and logs. Use fictional plates in tests. Never treat command acceptance or a missing camera event as proof of safe physical state.

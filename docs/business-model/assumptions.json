@@ -1,0 +1,72 @@
+{
+  "status": "Illustrative hypotheses for 24 October 2026; no measured commercial performance or supplier quotes",
+  "common": {
+    "days_per_month": 30,
+    "equipped_bays_per_site": 4,
+    "bookings_per_bay_day": 4,
+    "outcome_rates": {
+      "success": 0.85,
+      "no_show": 0.05,
+      "operator_failure": 0.05,
+      "cancelled": 0.05
+    },
+    "empty_hold_minutes": {
+      "success": 6,
+      "no_show": 10,
+      "operator_failure": 3,
+      "cancelled": 3
+    },
+    "saas_per_bay_month_eur_net": 29,
+    "installed_hardware_per_bay_eur_net": 1200,
+    "hardware_life_months": 48,
+    "cpo_operations_per_bay_month_eur_net": 6,
+    "authorization_cost_per_booking_eur": 0.03,
+    "goodwill_cost_per_operator_failure_eur": 2,
+    "paid_success_fee_eur_gross": 1.99,
+    "success_fee_vat_rate_assumed": 0.19,
+    "paid_fee_cpo_share_after_tax_and_processing": 0.8,
+    "no_show_fee_eur_gross_ceiling": 3,
+    "no_show_vat_rate_provisional": 0.19,
+    "no_show_billable_fraction_after_waivers": 0.5,
+    "card_processing_rate": 0.015,
+    "card_processing_fixed_eur": 0.25,
+    "bayready_variable_cost_per_bay_month_eur_net": 8,
+    "bayready_fixed_cost_per_month_eur_net": 18000,
+    "bayready_acquisition_cost_per_bay_eur_net": 120,
+    "customer_lifetime_months_assumed": 36
+  },
+  "scenarios": [
+    {
+      "name": "Downside",
+      "gross_restored_bay_minutes_per_day": 15,
+      "demand_probability_restored": 0.35,
+      "demand_probability_held": 0.35,
+      "average_delivered_power_kw": 20,
+      "energy_contribution_per_kwh_eur_net": 0.08
+    },
+    {
+      "name": "Base",
+      "gross_restored_bay_minutes_per_day": 60,
+      "demand_probability_restored": 0.65,
+      "demand_probability_held": 0.65,
+      "average_delivered_power_kw": 45,
+      "energy_contribution_per_kwh_eur_net": 0.12
+    },
+    {
+      "name": "Upside",
+      "gross_restored_bay_minutes_per_day": 120,
+      "demand_probability_restored": 0.85,
+      "demand_probability_held": 0.85,
+      "average_delivered_power_kw": 60,
+      "energy_contribution_per_kwh_eur_net": 0.18
+    },
+    {
+      "name": "Peak-hold stress",
+      "gross_restored_bay_minutes_per_day": 60,
+      "demand_probability_restored": 0.65,
+      "demand_probability_held": 0.9,
+      "average_delivered_power_kw": 45,
+      "energy_contribution_per_kwh_eur_net": 0.12
+    }
+  ]
+}
