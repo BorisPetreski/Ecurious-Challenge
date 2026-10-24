@@ -68,9 +68,7 @@ Eventbrite's API does not provide unrestricted public city search. The integrati
 | Shared storage and identity | Supabase PostgreSQL, Auth and Row Level Security |
 | Integrations | GoingElectric listings, Ecurious lock/whitelist/occupancy, Eventbrite organization/curated events |
 
-## Business model
 
-**Proposed buyer:** charging operators and retail, hotel or event hosts. **Starting software hypothesis:** €29 per equipped bay/month, or €116 for four bays, with hardware/installation quoted separately. Driver extensions and advance-booking fees are experiments; all app payments are mock. No charging uplift or commercial profitability has been measured. [Business model and editable economics](docs/BUSINESS-MODEL.md).
 
 ## Documentation
 
