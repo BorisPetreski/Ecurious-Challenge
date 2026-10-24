@@ -1,5 +1,7 @@
 # Coding and integration guide
 
+For the full architecture, screen flows, allocation domains and design decisions, read [SYSTEM-DESIGN.md](SYSTEM-DESIGN.md). Exact HTTP/RPC contracts are in [API.md](API.md), storage/transaction rules in [DATABASE.md](DATABASE.md), and setup/recovery in [OPERATIONS.md](OPERATIONS.md).
+
 The primary application is an Expo mobile app in `mobile/`, connected over HTTP to the in-memory Node simulator. The original browser demo remains in `public/`. A separate backend-only Ecurious adapter now provides real read-only hardware diagnostics in Activity. Reservation and charging writes remain simulated; live mode is unavailable. The app must not report a physical action as complete on the strength of a UI click or an unconfirmed command response. See [the actual API contract and observations](ECURIOUS-API.md).
 
 ## Architecture
@@ -14,9 +16,15 @@ flowchart LR
   Server --> Bay[Reservation hardware and camera]
   Browser -->|Direct user-device request with approved key| GE[GoingElectric discovery API]
   Driver -->|Direct device request with registered app key| GE
+  Driver -->|Guest auth and booking RPCs| Supabase[Supabase app holds: hosted setup pending]
+  Driver --> Profile[Native SecureStore driver profile]
 ```
 
 GoingElectric location/connector data and Ecurious bay occupancy have different sources. Add an explicit mapping from the mentor-confirmed station/EVSE/bay to the designated test hardware. Never enable reservations on arbitrary directory results merely because they appear nearby.
+
+The opening map uses Supabase for two separate application allocation domains: shared virtual slots for listed GoingElectric plugs, and administrator-approved location/bay/connector inventory. The schema/clients are prepared; applying the hosted migrations and enabling anonymous auth still require administrator access. See [Supabase setup and reservation flow](SUPABASE.md). BayReady holds are application state, not physical occupancy or an Ecurious command acknowledgement. The only seeded physical inventory is an explicitly fictional demo location. Both Supabase domains are independent of the original simulator at `/reserve`.
+
+The normalized registered inventory is `charging_locations` → `bookable_bays` → `bay_connectors`. A reservation records its selected connector but locks the whole bay. Directory groups instead generate opaque virtual slot references for `directory_plug_reservations`. A fresh successful hold query makes an absent app hold unreserved; a stale/failed query leaves status unknown. A slot hold excludes another BayReady booking for that slot, without inventing physical identity or vacancy. Public locations are shown by default; fictional test inventory is opt-in. First-launch profile data stays in device SecureStore; its connector preference controls filtering and its masked vehicle/mock payment appear in confirmation. Contact details and raw plates are not sent to Supabase or hardware.
 
 `npm start` starts Expo and binds the mock API to `0.0.0.0` for phone access. The standalone server still defaults to loopback; `npm run server:lan` intentionally exposes this local simulator to the LAN. Native fetch does not need browser CORS settings. See `mobile/README.md` for address overrides and same-network setup.
 
@@ -49,8 +57,8 @@ The local freshness window is 60 seconds, a display policy rather than a verifie
 3. Verify read-only diagnostics against reconnected hardware. Preserve unknown/stale state and observation time. Distinguish occupancy, barrier position, booking status, and charging evidence.
 4. Implement reserve/cancel or release using the **documented meanings**. Separate an accepted command from confirmed hardware state. After a timeout, reconcile status before retrying; use documented idempotency support where available.
 5. Consume the actual plate event feed. Validate its source, reject duplicate/out-of-order events, correlate bay and booking, and keep confidence/manual fallback visible. Do not expose the simulator's arbitrary `arrive` endpoint as a trusted live camera feed.
-6. Wire a live reservation service to the adapter; replacing the empty adapter file alone does not make the current simulator live. Remove the startup refusal only after the service, capabilities, UI labels, and event source are genuinely connected.
-7. Use the hardware/server as the authority for competing bookings and occupancy. A single Node process is only sufficient for the local demo. Production needs persistent bookings, atomic concurrency control, restart recovery, authenticated actors, and reconciled background expiry.
+6. Wire a live reservation orchestration service to the adapter; adding writes to the existing read-only adapter does not connect Supabase holds or make the simulator live. Remove the startup refusal only after the service, capabilities, UI labels, and event source are genuinely connected.
+7. Keep the database authoritative for competing application holds and trusted hardware authoritative for physical observations. Persistent atomic app allocation is already prepared; live operation additionally needs enrolled mappings, durable hardware-operation history, restart recovery and reconciled command/expiry processing.
 8. Record a full live cycle and two edge cases in `BUILD-LOG.md`. Distinguish real sensor evidence from simulated inputs in the pitch.
 
 ## Product rules to discuss with the team
@@ -61,16 +69,16 @@ The local freshness window is 60 seconds, a display policy rather than a verifie
 - No-show expiry may end a hold when no authorized arrival occurred. A missing plate event does not establish that the bay is empty. Occupancy interlocks must govern physical movement; occupied/unknown state requires safe recovery.
 - Charging evidence must come from the source agreed with organisers. “Start simulated charge” changes local state only.
 
-## GoingElectric browser integration
+## GoingElectric discovery integration
 
-The mobile Map tab uses `react-native-maps` and `mobile/src/lib/goingelectric-api.ts` for direct viewport queries. Root launchers load the registered directory key from `.env` and pass only that key as `EXPO_PUBLIC_GOINGELECTRIC_API_KEY`; they remove the hardware key from the Expo child environment. The directory key is accessible on the phone and must stay out of tracked files and shared build artifacts. No directory data goes through the Node server. Native station data has a one-hour memory lifetime, visible source/time/entry links, and no reservation mapping. Optional foreground location centers the viewport only after a user tap. Expo Go supplies its native map setup; an independently built Android binary needs its own configured Google Maps SDK key, separate from both provider keys. [Expo map documentation](https://docs.expo.dev/versions/latest/sdk/map-view/).
+The mobile Map tab uses `react-native-maps` and `mobile/src/lib/goingelectric-api.ts` for direct viewport queries. Root launchers load the registered directory key from `.env` and pass only that key as `EXPO_PUBLIC_GOINGELECTRIC_API_KEY`; they remove the hardware key from the Expo child environment. The directory key is accessible on the phone and must stay out of tracked files and shared build artifacts. No directory catalog goes through the Node server. Native station data has a one-hour memory lifetime and visible source/time/entry links. Software slot holds store booking references separately; no physical mapping is inferred. Optional foreground location centers the viewport only after a user tap. Expo Go supplies its native map setup; an independently built Android binary needs its own configured Google Maps SDK key, separate from both provider keys. [Expo map documentation](https://docs.expo.dev/versions/latest/sdk/map-view/).
 
-The optional UI uses `https://api.goingelectric.de/chargepoints/` with `key`, `lat`, `lng`, and integer `radius`. It renders `chargelocations` and their connector data. Keys are entered by the user, not baked into the repository. Directory results stay separate from the simulated bay. [Official API documentation](https://www.goingelectric.de/stromtankstellen/api/docs/).
+The original browser rehearsal optionally uses `https://api.goingelectric.de/chargepoints/` with `key`, `lat`, `lng`, and integer `radius`. The native client uses a bounding box instead. Both render `chargelocations` and connector data. Keys are not baked into the repository. Directory results stay separate from the Node simulated bay. [Official API documentation](https://www.goingelectric.de/stromtankstellen/api/docs/).
 
-The published terms restrict use to the registered app, require direct retrieval from the end user's device, limit device retention to 24 hours, and require source attribution and a per-entry link. Confirm the approved browser setup with mentors; do not work around failed CORS by silently introducing a server proxy. [Official API terms](https://www.goingelectric.de/stromtankstellen/api/terms/), checked 23 October 2026.
+The published terms restrict use to the registered app, require direct retrieval from the end user's device, limit device retention to 24 hours, and require source attribution and a per-entry link. Directory browsing remains accessible without completing a profile or successfully signing into bookings. Cross-device station/opaque-slot booking references are an unresolved provider/mentor clarification: the terms give no explicit exemption for hashes or derived IDs. Do not claim permission merely because no full catalog is stored, or work around failed CORS with a server proxy. [Official API terms](https://www.goingelectric.de/stromtankstellen/api/terms/), rechecked 24 October 2026.
 
 ## Plate data and practical limits
 
-Use fictional plates for preparation. The backend keeps a keyed fingerprint and masked display rather than retaining the submitted raw plate. Inputs still pass through browser and server memory; a keyed fingerprint is pseudonymous data, not proof of anonymisation or GDPR compliance. Live data handling, access, notices, retention, event payloads, and hardware-side retention need to be agreed with the organisers. The starter has no database or camera-image storage.
+Use fictional plates for preparation. The simulator keeps a keyed fingerprint and masked display rather than retaining the submitted raw plate. Inputs still pass through browser and server memory; a keyed fingerprint is pseudonymous data, not proof of anonymisation or GDPR compliance. The requested full driver profile, including plate, stays in native SecureStore. Prepared Supabase tables store app hold metadata and registered inventory, without raw plates or camera images. Live data handling, access, notices, retention, event payloads, and hardware-side retention need to be agreed with the organisers.
 
 The local server is for a laptop rehearsal, not a hosted booking service. It has no user authentication, payments, multi-tenant isolation, durable audit history, or real background hardware control. Keep simulator override endpoints out of a live deployment.

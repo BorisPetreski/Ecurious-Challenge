@@ -216,10 +216,121 @@ test('response size limit stops oversized reads without exposing the body', asyn
   assert.equal(signal.aborted, true);
 });
 
-test('hardware write methods refuse without sending a request', async () => {
+test('ambiguous booking reserve/release methods refuse without sending a request', async () => {
   let requests = 0;
   const adapter = reader(null, { fetchImpl: () => { requests++; throw new Error('No request expected'); } });
   await assert.rejects(() => adapter.reserve(), /not implemented/);
   await assert.rejects(() => adapter.release(), /not implemented/);
   assert.equal(requests, 0);
+});
+
+test('explicit barrier methods send one bounded authenticated POST and return only an unconfirmed acknowledgement', async () => {
+  for (const [method, action, target] of [['raiseBarrier', 'lock', 'raised'], ['lowerBarrier', 'unlock', 'lowered']]) {
+    const requests = [];
+    const adapter = reader(null, { fetchImpl: async (input, options) => {
+      const url = new URL(input);
+      assert.equal(url.origin, ECURIOUS_BASE_URL);
+      assert.equal(url.pathname, `/api/v1/locks/lock-demo-1/${action}`);
+      assert.equal(url.search, '');
+      assert.ok(!input.includes(KEY));
+      assert.equal(options.method, 'POST');
+      assert.equal(options.redirect, 'error');
+      assert.equal(options.headers['X-API-Key'], KEY);
+      assert.equal(options.headers['Content-Type'], 'application/json');
+      assert.ok(options.signal instanceof AbortSignal);
+      assert.deepEqual(JSON.parse(options.body), { cancelAutoLift: false });
+      requests.push(input);
+      return jsonResponse({
+        success: true, message: `${KEY} ${PLATE}`,
+        // This intentionally contradicts one target. An acknowledgement must
+        // never become proof of physical position from its numeric status.
+        result: { success: true, deviceStatus: 2, licensePlate: PLATE, apiKey: KEY, capture: 'fictional-private-capture' },
+      });
+    } });
+    const result = await adapter[method]('lock-demo-1');
+    assert.deepEqual(result, {
+      lockId: 'lock-demo-1', requestedBarrier: target,
+      acknowledged: true, confirmed: false, requestedAt: new Date(NOW).toISOString(),
+    });
+    for (const value of [KEY, PLATE, 'fictional-private-capture', 'deviceStatus']) assert.ok(!JSON.stringify(result).includes(value));
+    assert.equal(requests.length, 1);
+  }
+});
+
+test('barrier methods validate IDs and missing credentials without a network request', async () => {
+  let requests = 0;
+  const fetchImpl = () => { requests++; throw new Error('No request expected'); };
+  const adapter = reader(null, { fetchImpl });
+  const unconfigured = new EcuriousAdapter({ apiKey: '', clock, fetchImpl });
+  for (const method of ['raiseBarrier', 'lowerBarrier']) {
+    await rejectsWith(() => adapter[method](`../${KEY}`), 'ECURIOUS_LOCK_ID', [KEY]);
+    await rejectsWith(() => unconfigured[method]('lock-demo-1'), 'ECURIOUS_NOT_CONFIGURED');
+  }
+  assert.equal(requests, 0);
+});
+
+test('command authentication and missing-route failures stay sanitized and are not retried', async () => {
+  for (const [status, code] of [[401, 'ECURIOUS_AUTH'], [403, 'ECURIOUS_AUTH'], [404, 'ECURIOUS_NOT_FOUND']]) {
+    let requests = 0;
+    const adapter = reader(null, { fetchImpl: async () => {
+      requests++;
+      return jsonResponse({ error: `${KEY} ${PLATE}` }, { status });
+    } });
+    await rejectsWith(() => adapter.raiseBarrier('lock-demo-1'), code, [KEY, PLATE]);
+    assert.equal(requests, 1);
+  }
+});
+
+test('unacknowledged, malformed, oversized, network and server failures preserve uncertain command outcomes without retries', async t => {
+  const cases = [
+    { name: 'negative provider acknowledgement', response: () => jsonResponse({ success: false, result: { success: false }, message: `${KEY} ${PLATE}` }) },
+    { name: 'missing acknowledgement result', response: () => jsonResponse({ success: true }) },
+    { name: 'nested failure despite top-level success', response: () => jsonResponse({ success: true, result: { success: false } }) },
+    { name: 'non-boolean success', response: () => jsonResponse({ success: 'true', result: { success: true } }) },
+    { name: 'malformed response', response: () => new Response(`{"private":"${KEY} ${PLATE}"`, { headers: { 'content-type': 'application/json' } }) },
+    { name: 'unsupported response', response: () => new Response(`${KEY} ${PLATE}`, { headers: { 'content-type': 'text/html' } }) },
+    { name: 'oversized response', response: () => jsonResponse({ success: true, result: { success: true }, private: 'x'.repeat(1024 * 1024) }) },
+    { name: 'server error', response: () => jsonResponse({ error: `${KEY} ${PLATE}` }, { status: 503 }) },
+    { name: 'connection or redirect failure', response: () => { throw new Error(`private connection error ${KEY} ${PLATE}`); } },
+  ];
+  for (const item of cases) await t.test(item.name, async () => {
+    let requests = 0;
+    const adapter = reader(null, { fetchImpl: async () => { requests++; return item.response(); } });
+    await assert.rejects(() => adapter.lowerBarrier('lock-demo-1'), error => {
+      assert.ok(error instanceof EcuriousApiError);
+      assert.equal(error.code, 'ECURIOUS_COMMAND_UNCERTAIN');
+      assert.equal(error.uncertain, true);
+      assert.equal(error.status, 502);
+      assert.match(error.message, /Physical outcome is unknown/);
+      assert.match(error.message, /Reconcile authenticated status/);
+      assert.ok(!error.message.includes(KEY));
+      assert.ok(!error.message.includes(PLATE));
+      assert.ok(!error.message.includes('No hardware command was sent'));
+      return true;
+    });
+    assert.equal(requests, 1);
+  });
+});
+
+test('command timeout aborts once and explicitly preserves the possibility of an accepted movement', async () => {
+  let requests = 0;
+  let aborted = false;
+  const adapter = reader(null, { timeoutMs: 20, fetchImpl: async (_url, { signal }) => {
+    requests++;
+    return new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => { aborted = true; reject(new Error(`${KEY} ${PLATE}`)); }, { once: true });
+    });
+  } });
+  await assert.rejects(() => adapter.raiseBarrier('lock-demo-1'), error => {
+    assert.equal(error.code, 'ECURIOUS_COMMAND_UNCERTAIN');
+    assert.equal(error.status, 504);
+    assert.equal(error.uncertain, true);
+    assert.match(error.message, /may already have been accepted/);
+    assert.ok(!error.message.includes('No hardware command was sent'));
+    assert.ok(!error.message.includes(KEY));
+    assert.ok(!error.message.includes(PLATE));
+    return true;
+  });
+  assert.equal(requests, 1);
+  assert.equal(aborted, true);
 });

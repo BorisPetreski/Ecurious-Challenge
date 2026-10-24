@@ -1,0 +1,358 @@
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { readFile, readdir } from 'node:fs/promises';
+
+// Only synthetic data enters this isolated PostgreSQL instance. This script
+// never reads .env, connects to Supabase, publishes ports, or moves hardware.
+const root = new URL('../', import.meta.url);
+const ownerToken = randomUUID();
+const containerName = `bayready-reservations-test-${process.pid}-${ownerToken.slice(0, 8)}`;
+const ownerLabel = 'com.bayready.test.owner';
+const image = 'postgres:17-alpine';
+const activeChildren = new Set();
+let interrupted = false;
+let cleaningUp = false;
+
+function interrupt() {
+  interrupted = true;
+  if (!cleaningUp) for (const child of activeChildren) child.kill('SIGTERM');
+}
+process.once('SIGINT', interrupt);
+process.once('SIGTERM', interrupt);
+
+function command(args, { input = '', marker, timeoutMs = 15000 } = {}) {
+  const child = spawn('docker', args, { stdio: ['pipe', 'pipe', 'pipe'] });
+  activeChildren.add(child);
+  let stdout = '';
+  let stderr = '';
+  let spawnError;
+  let timedOut = false;
+  let ended = false;
+  let markerFound = false;
+  let resolveMarker;
+  let rejectMarker;
+  const markerSeen = marker && new Promise((resolve, reject) => {
+    resolveMarker = resolve;
+    rejectMarker = reject;
+  });
+  // A process may fail before its caller starts waiting for the marker.
+  markerSeen?.catch(() => {});
+
+  const timer = setTimeout(() => {
+    timedOut = true;
+    child.kill('SIGTERM');
+    rejectMarker?.(new Error('Database test command timed out.'));
+  }, timeoutMs);
+
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => {
+    stdout += chunk;
+    if (stdout.length > 1024 * 1024) child.kill('SIGTERM');
+    if (marker && !markerFound && stdout.split(/\r?\n/).includes(marker)) {
+      markerFound = true;
+      resolveMarker();
+    }
+  });
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk;
+    if (stderr.length > 1024 * 1024) child.kill('SIGTERM');
+  });
+  child.on('error', (error) => {
+    spawnError = error;
+    rejectMarker?.(error);
+  });
+  child.stdin.on('error', () => {}); // Early psql errors can close stdin first.
+  child.stdin.end(input);
+
+  const done = new Promise((resolve) => {
+    child.on('close', (code, signal) => {
+      ended = true;
+      activeChildren.delete(child);
+      clearTimeout(timer);
+      if (marker && !markerFound) rejectMarker(new Error('The reservation client exited before acquiring its lock.'));
+      resolve({ code, signal, stdout, stderr, spawnError, timedOut });
+    });
+  });
+  return { done, markerSeen, get ended() { return ended; } };
+}
+
+function requireSuccess(result, description) {
+  if (result.code === 0 && !result.spawnError && !result.timedOut) return result.stdout;
+  const detail = result.spawnError?.message || result.stderr.trim() || `exit ${result.code}`;
+  throw new Error(`${description}: ${detail}`);
+}
+
+async function docker(args, description, options) {
+  return requireSuccess(await command(args, options).done, description);
+}
+
+function psql(sql, options = {}) {
+  return command([
+    'exec', '-i', containerName,
+    'psql', '-X', '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-Atq',
+  ], { ...options, input: sql });
+}
+
+async function executeSql(sql, description) {
+  return requireSuccess(await psql(sql).done, description);
+}
+
+function jsonResult(output) {
+  const rows = output.split(/\r?\n/).filter((line) => line.startsWith('{'));
+  assert.equal(rows.length, 1, 'Expected exactly one JSON result from the test client.');
+  return JSON.parse(rows[0]);
+}
+
+function reservationSql({ owner, bay, request, connector, marker }) {
+  // These values are fixed fictional UUIDs below, never external input.
+  return `
+    begin;
+    set local role authenticated;
+    set local "request.jwt.claim.sub" = '${owner}';
+    select public.reserve_bay('${bay}', 10, '${request}', '${connector}');
+    ${marker ? `select '${marker}'; select pg_catalog.pg_sleep(1);` : ''}
+    commit;
+  `;
+}
+
+async function runRaces() {
+  const ownerA = '71111111-1111-4111-8111-111111111111';
+  const ownerB = '72222222-2222-4222-8222-222222222222';
+  const competingBay = '7aaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1';
+  const retryBay = '7aaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2';
+  const requestA = '7bbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1';
+  const requestB = '7bbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2';
+  const retryRequest = '7bbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3';
+  const location = '7aaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaa100';
+  const competingConnectorA = '7ccccccc-cccc-4ccc-8ccc-ccccccccccc1';
+  const competingConnectorB = '7ccccccc-cccc-4ccc-8ccc-ccccccccccc2';
+  const retryConnector = '7ccccccc-cccc-4ccc-8ccc-ccccccccccc3';
+
+  await executeSql(`
+    insert into auth.users(id) values ('${ownerA}'), ('${ownerB}');
+    insert into public.charging_locations(id, label) values ('${location}', 'Fictional race location');
+    insert into public.bookable_bays(id, location_id, label, integration_mode, enabled) values
+      ('${competingBay}', '${location}', 'Fictional race test bay', 'demo', true),
+      ('${retryBay}', '${location}', 'Fictional idempotency test bay', 'demo', true);
+    insert into public.bay_connectors(id, bay_id, label, connector_type, power_kw, enabled) values
+      ('${competingConnectorA}', '${competingBay}', 'Race bay CCS', 'CCS', 150, true),
+      ('${competingConnectorB}', '${competingBay}', 'Race bay Type 2', 'Typ2', 22, true),
+      ('${retryConnector}', '${retryBay}', 'Retry bay CCS', 'CCS', 150, true);
+  `, 'Create fictional race fixtures');
+
+  const first = psql(reservationSql({
+    owner: ownerA, bay: competingBay, request: requestA, connector: competingConnectorA, marker: 'BAYREADY_COMPETING_LOCK_HELD',
+  }), { marker: 'BAYREADY_COMPETING_LOCK_HELD' });
+  await first.markerSeen;
+  assert.equal(first.ended, false, 'The first client must still hold its transaction lock.');
+  const second = psql(reservationSql({ owner: ownerB, bay: competingBay, request: requestB, connector: competingConnectorB }));
+  const [firstResult, secondResult] = await Promise.all([first.done, second.done]);
+  const winningHold = jsonResult(requireSuccess(firstResult, 'First competing reservation'));
+  assert.notEqual(secondResult.code, 0, 'The competing client must fail.');
+  assert.match(secondResult.stderr, /BAY_RESERVED/, 'The competing client must receive BAY_RESERVED.');
+  const competingRows = jsonResult(await executeSql(`
+    select pg_catalog.jsonb_build_object(
+      'count', pg_catalog.count(*),
+      'held', pg_catalog.count(*) filter (where status = 'held'),
+      'winner', pg_catalog.bool_and(owner_id = '${ownerA}'::uuid)
+    ) from public.booking_reservations where bay_id = '${competingBay}';
+  `, 'Verify competing reservation rows'));
+  assert.deepEqual(competingRows, { count: 1, held: 1, winner: true });
+  assert.equal(winningHold.status, 'held');
+  assert.equal(winningHold.connectorId, competingConnectorA);
+  console.log('PASS competing clients on different connectors: one bay hold; second request rejected');
+
+  const original = psql(reservationSql({
+    owner: ownerA, bay: retryBay, request: retryRequest, connector: retryConnector, marker: 'BAYREADY_RETRY_LOCK_HELD',
+  }), { marker: 'BAYREADY_RETRY_LOCK_HELD' });
+  await original.markerSeen;
+  assert.equal(original.ended, false, 'The original request must still hold its transaction lock.');
+  const retry = psql(reservationSql({ owner: ownerA, bay: retryBay, request: retryRequest, connector: retryConnector }));
+  const [originalResult, retryResult] = await Promise.all([original.done, retry.done]);
+  const originalHold = jsonResult(requireSuccess(originalResult, 'Original idempotent request'));
+  const retriedHold = jsonResult(requireSuccess(retryResult, 'Concurrent idempotent retry'));
+  assert.deepEqual(retriedHold, originalHold, 'Concurrent retry must preserve ID and every timestamp.');
+  const retryRows = jsonResult(await executeSql(`
+    select pg_catalog.jsonb_build_object(
+      'count', pg_catalog.count(*),
+      'held', pg_catalog.count(*) filter (where status = 'held')
+    ) from public.booking_reservations where bay_id = '${retryBay}';
+  `, 'Verify idempotent reservation rows'));
+  assert.deepEqual(retryRows, { count: 1, held: 1 });
+  console.log('PASS concurrent retry: same reservation and deadline; one row');
+}
+
+function directoryReservationSql({ owner, station, slot, request, marker, holdSeconds = 1 }) {
+  return `
+    begin;
+    set local role authenticated;
+    set local "request.jwt.claim.sub" = '${owner}';
+    select public.reserve_directory_plug(${station}, '${slot}', 10, '${request}');
+    ${marker ? `select '${marker}'; select pg_catalog.pg_sleep(${holdSeconds});` : ''}
+    commit;
+  `;
+}
+
+async function runDirectoryRaces() {
+  const ownerA = '81111111-1111-4111-8111-111111111111';
+  const ownerB = '82222222-2222-4222-8222-222222222222';
+  const slotA = 'a'.repeat(64);
+  const slotB = 'b'.repeat(64);
+  const slotC = 'c'.repeat(64);
+  const slotD = 'd'.repeat(64);
+  const requestA = '8bbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1';
+  const requestB = '8bbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2';
+  const requestC = '8bbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3';
+  const requestD = '8bbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb4';
+  const retryRequest = '8bbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb5';
+  await executeSql(`insert into auth.users(id) values ('${ownerA}'), ('${ownerB}');`, 'Create directory race guests');
+
+  const first = psql(directoryReservationSql({
+    owner: ownerA, station: 7001, slot: slotA, request: requestA, marker: 'DIRECTORY_SLOT_LOCK_HELD',
+  }), { marker: 'DIRECTORY_SLOT_LOCK_HELD' });
+  await first.markerSeen;
+  assert.equal(first.ended, false);
+  const second = psql(directoryReservationSql({ owner: ownerB, station: 7001, slot: slotA, request: requestB }));
+  const [firstResult, secondResult] = await Promise.all([first.done, second.done]);
+  const firstHold = jsonResult(requireSuccess(firstResult, 'First directory plug hold'));
+  assert.notEqual(secondResult.code, 0);
+  assert.match(secondResult.stderr, /PLUG_RESERVED/);
+  const exclusiveRows = jsonResult(await executeSql(`
+    select pg_catalog.jsonb_build_object('count',count(*),'held',count(*) filter (where status='held'))
+    from public.directory_plug_reservations where station_id=7001 and slot_key='${slotA}';
+  `, 'Verify directory slot exclusivity'));
+  assert.deepEqual(exclusiveRows, { count: 1, held: 1 });
+  console.log('PASS directory same-plug race: one hold; competing user rejected');
+
+  const independentFirst = psql(directoryReservationSql({
+    owner: ownerA, station: 7002, slot: slotB, request: requestC,
+    marker: 'DIRECTORY_INDEPENDENT_LOCK_HELD', holdSeconds: 2,
+  }), { marker: 'DIRECTORY_INDEPENDENT_LOCK_HELD' });
+  await independentFirst.markerSeen;
+  const independentSecond = psql(directoryReservationSql({ owner: ownerB, station: 7002, slot: slotC, request: requestD }));
+  requireSuccess(await independentSecond.done, 'Independent directory plug');
+  assert.equal(independentFirst.ended, false, 'An independent plug must commit while the first plug is still locked.');
+  requireSuccess(await independentFirst.done, 'First independent directory plug');
+  const independentRows = jsonResult(await executeSql(`
+    select pg_catalog.jsonb_build_object('held',count(*) filter (where status='held'))
+    from public.directory_plug_reservations where station_id=7002;
+  `, 'Verify independent directory slots'));
+  assert.deepEqual(independentRows, { held: 2 });
+  console.log('PASS directory independent plugs: both users commit concurrently');
+
+  const original = psql(directoryReservationSql({
+    owner: ownerA, station: 7003, slot: slotD, request: retryRequest, marker: 'DIRECTORY_RETRY_LOCK_HELD',
+  }), { marker: 'DIRECTORY_RETRY_LOCK_HELD' });
+  await original.markerSeen;
+  const retry = psql(directoryReservationSql({ owner: ownerA, station: 7003, slot: slotD, request: retryRequest }));
+  const [originalResult, retryResult] = await Promise.all([original.done, retry.done]);
+  const originalHold = jsonResult(requireSuccess(originalResult, 'Original directory request'));
+  assert.deepEqual(jsonResult(requireSuccess(retryResult, 'Concurrent directory retry')), originalHold);
+  const retryRows = jsonResult(await executeSql(`
+    select pg_catalog.jsonb_build_object('count',count(*)) from public.directory_plug_reservations where station_id=7003;
+  `, 'Verify directory retry count'));
+  assert.deepEqual(retryRows, { count: 1 });
+  console.log('PASS directory identical retry: one reservation and unchanged deadline');
+
+  assert.match(firstHold.id, /^[0-9a-f-]{36}$/i);
+  const cancellation = jsonResult(await executeSql(`
+    begin;
+    set local role authenticated;
+    set local "request.jwt.claim.sub"='${ownerA}';
+    select public.cancel_directory_hold('${firstHold.id}');
+    commit;
+  `, 'Cancel an owned directory hold'));
+  assert.equal(cancellation.status, 'cancelled');
+  const afterCancellation = jsonResult(await executeSql(`
+    begin;
+    set local role authenticated;
+    set local "request.jwt.claim.sub"='${ownerB}';
+    select public.list_directory_holds(array[7001]::bigint[]);
+    commit;
+  `, 'Read directory status after cancellation'));
+  assert.equal(afterCancellation.holds.some(hold => hold.stationId === 7001), false);
+  console.log('PASS directory owner cancellation: other users see the slot unreserved');
+}
+
+let failure;
+try {
+  await docker(['image', 'inspect', image], `Cached Docker image ${image} is required; run docker pull ${image}`);
+  await docker([
+    'run', '--detach', '--rm', '--pull=never', '--network', 'none',
+    '--tmpfs', '/var/lib/postgresql/data:rw',
+    '--env', 'POSTGRES_HOST_AUTH_METHOD=trust',
+    '--label', `${ownerLabel}=${ownerToken}`, '--name', containerName, image,
+  ], 'Start isolated PostgreSQL');
+
+  const readyDeadline = Date.now() + 10000;
+  let ready = false;
+  while (Date.now() < readyDeadline && !interrupted) {
+    // initdb briefly starts a temporary server. Wait for the final postgres
+    // process to become PID 1 before accepting readiness from pg_isready.
+    const processName = await command(['exec', containerName, 'cat', '/proc/1/comm'], { timeoutMs: 2000 }).done;
+    if (processName.code === 0 && processName.stdout.trim() === 'postgres') {
+      const result = await command(['exec', containerName, 'pg_isready', '-U', 'postgres', '-d', 'postgres'], { timeoutMs: 2000 }).done;
+      if (result.code === 0) { ready = true; break; }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  if (!ready) throw new Error('Isolated PostgreSQL did not become ready.');
+  if (interrupted) throw new Error('Database tests interrupted.');
+
+  await executeSql(`
+    create role anon nologin;
+    create role authenticated nologin;
+    create role service_role nologin;
+    create schema auth;
+    create table auth.users(id uuid primary key);
+    create function auth.uid() returns uuid language sql stable as $$
+      select nullif(pg_catalog.current_setting('request.jwt.claim.sub', true), '')::uuid
+    $$;
+    grant usage on schema public, auth to anon, authenticated;
+  `, 'Create local Supabase authentication shims');
+
+  const migrationDirectory = new URL('supabase/migrations/', root);
+  const migrations = (await readdir(migrationDirectory)).filter((name) => name.endsWith('.sql')).sort();
+  assert.ok(migrations.length, 'No database migrations found.');
+  for (const migration of migrations) {
+    await executeSql(await readFile(new URL(migration, migrationDirectory), 'utf8'), `Apply ${migration}`);
+    if (migration === '20261024120000_bayready_reservations.sql') {
+      await executeSql(await readFile(new URL('supabase/tests/reservation_contract.sql', root), 'utf8'), 'Original reservation SQL contract assertions');
+      await executeSql(await readFile(new URL('supabase/tests/pre_hierarchy_fixture.sql', root), 'utf8'), 'Seed fictional upgrade history');
+    }
+  }
+  await executeSql(
+    await readFile(new URL('supabase/tests/hierarchy_contract.sql', root), 'utf8'),
+    'Location, bay and connector SQL assertions',
+  );
+  await executeSql(
+    await readFile(new URL('supabase/tests/directory_contract.sql', root), 'utf8'),
+    'App-only directory hold SQL assertions',
+  );
+  console.log('PASS migrations, auth/permissions, ownership, cancellation, expiry, and validation');
+  await runRaces();
+  await runDirectoryRaces();
+} catch (error) {
+  failure = error;
+} finally {
+  cleaningUp = true;
+  // The label prevents cleanup from removing any container we did not create.
+  const inspect = await command([
+    'inspect', '--format', `{{ index .Config.Labels "${ownerLabel}" }}`, containerName,
+  ], { timeoutMs: 3000 }).done;
+  if (inspect.code === 0 && inspect.stdout.trim() === ownerToken) {
+    const cleanup = await command(['rm', '--force', containerName], { timeoutMs: 5000 }).done;
+    if (cleanup.code !== 0) failure ??= new Error(`Could not remove test container ${containerName}.`);
+  }
+  process.removeListener('SIGINT', interrupt);
+  process.removeListener('SIGTERM', interrupt);
+}
+
+if (failure || interrupted) {
+  console.error(failure?.message || 'Database tests interrupted.');
+  process.exitCode = interrupted ? 130 : 1;
+} else {
+  console.log('PASS isolated database removed; no hosted project changed');
+}

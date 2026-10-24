@@ -20,6 +20,7 @@ if (!existsSync(resolve(root, 'mobile/node_modules/expo/package.json'))) {
 }
 
 const apiPort = process.env.PORT || '3000';
+const expoEnvironment = mobileEnvironment(process.env);
 if (!/^\d+$/.test(apiPort) || Number(apiPort) < 1 || Number(apiPort) > 65535) {
   console.error('PORT must be a whole number from 1 to 65535.');
   process.exit(1);
@@ -89,7 +90,7 @@ if (!ready || stopping || backend.exitCode !== null) {
   console.log('Keep the phone and Mac on the same Wi-Fi. Scan the Expo QR code below.');
   console.log('Ctrl+C stops both Expo and the demo API.');
   run(process.execPath, [resolve(root, 'mobile/node_modules/expo/bin/cli'), 'start', '--go', '--lan', '--port', '8081', ...process.argv.slice(2)], {
-    ...mobileEnvironment(process.env),
+    ...expoEnvironment,
     EXPO_PUBLIC_API_PORT: apiPort,
   }, resolve(root, 'mobile'));
 }

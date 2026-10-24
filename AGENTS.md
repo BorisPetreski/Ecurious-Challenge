@@ -14,13 +14,18 @@ This is BayReady for the Ecurious WATT THE HACK challenge on 24 October 2026. Th
 
 ## Integration facts
 
-- Reservation controls and charging remain simulated. The backend adapter supports real read-only lock/status diagnostics; hardware writes still throw. Read `docs/ECURIOUS-API.md` for the observed contract and unresolved interlocks before adding commands.
+- Physical reservation controls and charging remain simulated; Supabase app holds allocate software resources separately. The backend adapter supports real read-only lock/status diagnostics; hardware writes still throw. Read `docs/ECURIOUS-API.md` for the observed contract and unresolved interlocks before adding commands.
 - Internal `/api/*` routes are not Ecurious API endpoints. Confirm reserve/release semantics, occupancy interlocks, status acknowledgements, and actual plate event delivery before wiring live behavior.
 - The mobile Map tab uses react-native-maps with direct device GoingElectric API requests. Root launchers pass ELECTRIC_API_KEY (or GOINGELECTRIC_API_KEY) to EXPO_PUBLIC_GOINGELECTRIC_API_KEY; this directory credential is available on the phone, while ECURIOUS_API_KEY stays backend-only. Keep attribution, timestamps, per-station links, bounded memory retention, and separation from simulated stations. Do not proxy or redistribute directory data. The original browser demo retains an optional direct API request.
 - Directory station IDs do not automatically map to a reservable Ecurious bay. Only the designated hardware is part of the real demo.
+- The full-screen map uses Supabase for separate virtual directory-slot holds and registered physical-bay inventory. Read `docs/SUPABASE.md`, `docs/DATABASE.md` and `docs/SYSTEM-DESIGN.md` before changing it. Three migrations are prepared; hosted migration/auth activation remain pending. Directory app holds store station/opaque-slot booking references, without importing a catalog or controlling public hardware. A fresh scoped database read is required before missing holds mean unreserved. The registered seed is explicitly fictional. 'Unreserved in BayReady' never means physically vacant. The original simulator lives at `/reserve` and does not share these database holds.
+- Inventory uses location → physical one-vehicle bay → individual connector. Booking one connector holds the entire bay. GoingElectric aggregate counts may be displayed as listed plug choices but must never become fabricated bay/connector identities or claims of vacancy. Public locations are visible by default; fictional test inventory is opt-in.
+- The first-launch driver profile is local SecureStore data, not a Supabase identity. Do not upload/log its contact details or raw plate. The preferred connector automatically filters the map; minimum power remains manual. Payment methods are fixed mock choices with no real card input or charge.
 - Preserve explicit mock/live labels. The proposed mission areas are no-shows and blocked bays; confirm scope with the newly formed team and prioritize the real full cycle over extra features.
 - Keep secrets, raw plates, and camera captures out of tracked files and logs. Use fictional plates in tests. Never treat command acceptance or a missing camera event as proof of safe physical state.
 
 ## Documentation
 
 Update `docs/BUILD-LOG.md` with actual contract details, decisions, failed attempts, and observed evidence. Keep hypothetical pricing and utilisation inputs labelled as assumptions. Avoid claiming OCPI/OCPP compliance, real charging, or GDPR compliance without evidence.
+
+Keep the documentation index and system design current when contracts change. API, database and operations references must distinguish directory software slots, registered whole-bay allocation, the independent simulator, and read-only hardware observations. Provider confirmation of cross-device directory booking references remains open; hashes do not establish permission or physical plug identity.

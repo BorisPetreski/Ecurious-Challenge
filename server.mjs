@@ -4,6 +4,8 @@ import { dirname, extname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createSimulator, DomainError } from './lib/simulator.mjs';
 import { EcuriousAdapter, EcuriousApiError } from './lib/ecurious-adapter.mjs';
+import { HardwareWorkflowError, SupabaseHardwareStore } from './lib/hardware-store.mjs';
+import { HardwareWorkflowService } from './lib/hardware-workflow.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const MAX_BODY_BYTES = 8 * 1024;
@@ -54,7 +56,7 @@ function isWithin(root, target) {
 }
 
 /** Exported for an HTTP smoke test without binding a production port. */
-export function createServer({ simulator = createSimulator(), hardware = new EcuriousAdapter(), publicDir = resolve(ROOT, 'public') } = {}) {
+export function createServer({ simulator = createSimulator(), hardware = new EcuriousAdapter(), hardwareWorkflow = null, publicDir = resolve(ROOT, 'public') } = {}) {
   return createHttpServer(async (request, response) => {
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader('Referrer-Policy', 'no-referrer');
@@ -69,12 +71,28 @@ export function createServer({ simulator = createSimulator(), hardware = new Ecu
           json(response, 200, simulator.getState());
         } else if (request.method === 'GET' && url.pathname === '/api/hardware') {
           json(response, 200, await hardware.listLocks());
+        } else if (request.method === 'GET' && url.pathname === '/api/hardware/bookings') {
+          const token = request.headers.authorization?.replace(/^Bearer /i, '');
+          json(response, 200, hardwareWorkflow ? await hardwareWorkflow.snapshot(token) : {
+            source: 'ecurious', commandsEnabled: false, reason: 'HARDWARE_SETUP_REQUIRED',
+            serverNow: new Date().toISOString(), workflows: [], observations: [],
+          });
+        } else if (request.method === 'POST' && ['/api/hardware/bookings', '/api/hardware/actions'].includes(url.pathname)) {
+          if (!hardwareWorkflow?.configured) throw new HardwareWorkflowError('HARDWARE_SETUP_REQUIRED', 'Designated hardware control is not activated on this backend.', 503);
+          const authorization = request.headers.authorization;
+          if (typeof authorization !== 'string' || !/^Bearer [A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/i.test(authorization)) {
+            throw new HardwareWorkflowError('AUTH_REQUIRED', 'Use your authenticated app booking session for designated-bay actions.', 401);
+          }
+          const token = authorization.slice(7);
+          const body = await readJson(request);
+          json(response, 202, url.pathname === '/api/hardware/bookings'
+            ? await hardwareWorkflow.reserve(token, body) : await hardwareWorkflow.act(token, body));
         } else if (request.method === 'POST' && url.pathname === '/api/reservations') {
           json(response, 201, simulator.reserve(await readJson(request)));
         } else if (request.method === 'POST' && url.pathname === '/api/actions') {
           json(response, 200, simulator.action(await readJson(request)));
-        } else if (['/api/state', '/api/health', '/api/hardware', '/api/reservations', '/api/actions'].includes(url.pathname)) {
-          const allow = ['/api/state', '/api/health', '/api/hardware'].includes(url.pathname) ? 'GET' : 'POST';
+        } else if (['/api/state', '/api/health', '/api/hardware', '/api/reservations', '/api/actions', '/api/hardware/bookings', '/api/hardware/actions'].includes(url.pathname)) {
+          const allow = url.pathname === '/api/hardware/bookings' ? 'GET, POST' : ['/api/state', '/api/health', '/api/hardware'].includes(url.pathname) ? 'GET' : 'POST';
           json(response, 405, { error: { code: 'METHOD_NOT_ALLOWED', message: 'This route does not support that method.' } }, { Allow: allow });
         } else {
           json(response, 404, { error: { code: 'NOT_FOUND', message: 'API route not found.' } });
@@ -120,11 +138,11 @@ export function createServer({ simulator = createSimulator(), hardware = new Ecu
         response.destroy();
         return;
       }
-      if (error instanceof DomainError || error instanceof EcuriousApiError) {
+      if (error instanceof DomainError || error instanceof EcuriousApiError || error instanceof HardwareWorkflowError) {
         json(response, error.status, { error: { code: error.code, message: error.message } });
       } else {
         // Do not log request bodies, scanned plates or third-party error payloads.
-        json(response, 500, { error: { code: 'INTERNAL_ERROR', message: 'The local simulator could not process this request.' } });
+        json(response, 500, { error: { code: 'INTERNAL_ERROR', message: 'The local API could not process this request.' } });
       }
     }
   });
@@ -144,11 +162,27 @@ export function start({ env = process.env } = {}) {
     throw new Error('HOST must be 127.0.0.1, localhost, or 0.0.0.0.');
   }
   const hardware = new EcuriousAdapter({ apiKey: env.ECURIOUS_API_KEY, baseUrl: env.ECURIOUS_BASE_URL });
-  const server = createServer({ hardware });
+  const rawCommandsEnabled = env.ECURIOUS_COMMANDS_ENABLED ?? 'false';
+  if (!['true', 'false'].includes(rawCommandsEnabled)) throw new HardwareWorkflowError('HARDWARE_CONFIGURATION', 'ECURIOUS_COMMANDS_ENABLED must be true or false.', 503);
+  const store = new SupabaseHardwareStore({
+    url: env.SUPABASE_URL,
+    publicKey: env.SUPABASE_PUBLISHABLE_KEY || env.SUPABASE_ANON_KEY || env.SUPABASE_API_KEY,
+    serverKey: env.SUPABASE_SECRET_KEY || env.SUPABASE_SERVICE_ROLE_KEY,
+  });
+  const hardwareWorkflow = new HardwareWorkflowService({
+    store, hardware, commandsEnabled: rawCommandsEnabled === 'true',
+    lockIds: (env.ECURIOUS_LOCK_IDS ?? '').split(',').map(id => id.trim()).filter(Boolean),
+  });
+  if (rawCommandsEnabled === 'true' && !hardwareWorkflow.configured) throw new HardwareWorkflowError('HARDWARE_CONFIGURATION',
+    'Hardware control needs a backend Supabase server key, project settings, Ecurious key and explicit assigned lock IDs.', 503);
+  const server = createServer({ hardware, hardwareWorkflow });
+  server.on('close', () => hardwareWorkflow.stop());
   server.listen(Number(rawPort), host, () => {
     const localHost = host === '0.0.0.0' ? '127.0.0.1' : host;
     console.log(`BayReady local API: http://${localHost}:${rawPort} (reservations and charging simulated)`);
-    console.log(hardware.configured ? 'Ecurious read-only diagnostics enabled at /api/hardware. Hardware commands remain disabled.' : 'Ecurious diagnostics need ECURIOUS_API_KEY in the backend .env.');
+    console.log(hardware.configured ? 'Ecurious diagnostics enabled at /api/hardware.' : 'Ecurious diagnostics need ECURIOUS_API_KEY in the backend .env.');
+    console.log(hardwareWorkflow.configured ? 'Designated hardware workflow enabled; commands require database claims and verified preflight. Simulator remains mock.' : 'Designated hardware commands are disabled; workflow setup is required.');
+    hardwareWorkflow.start();
     if (host === '0.0.0.0') {
       console.log(`LAN simulator enabled on 0.0.0.0:${rawPort}. Expo Go can use http://<laptop-LAN-IP>:${rawPort} on the same network.`);
     }

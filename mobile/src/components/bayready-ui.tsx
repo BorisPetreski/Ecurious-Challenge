@@ -22,7 +22,7 @@ export function AppFrame({ children, mode = 'simulator' }: PropsWithChildren<{ m
       </View>
       <View style={ui.flex}>{children}</View>
       <View style={ui.navigation}>
-        {([{ href: '/map', label: 'Map', mark: '01' }, { href: '/', label: 'Reserve', mark: '02' }, { href: '/activity', label: 'Activity', mark: '03' }] as const).map((tab) => {
+        {([{ href: '/', label: 'Map', mark: '01' }, { href: '/reserve', label: 'Simulator', mark: '02' }, { href: '/activity', label: 'Activity', mark: '03' }] as const).map((tab) => {
           const selected = pathname === tab.href;
           return (
             <Link href={tab.href} asChild replace key={tab.href}>

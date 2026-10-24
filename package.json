@@ -16,6 +16,7 @@
     "server:lan": "node scripts/start-server.mjs --lan",
     "dev": "node --watch --env-file-if-exists=.env server.mjs",
     "test": "node --test test/*.test.mjs",
+    "test:database": "node scripts/test-database.mjs",
     "check": "node --check server.mjs && node --check public/app.js && node --check lib/ecurious-adapter.mjs && node --check scripts/start-mobile.mjs && node --check scripts/start-server.mjs && node --check scripts/start-expo.mjs && node --check scripts/mobile-environment.mjs && node --check scripts/inspect-hardware.mjs && npm --prefix mobile run typecheck",
     "mobile:check": "npm --prefix mobile run typecheck",
     "mobile:doctor": "npm --prefix mobile run doctor",

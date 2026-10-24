@@ -1,6 +1,6 @@
 # BayReady mobile
 
-Expo SDK 58, React Native, Expo Router, and TypeScript. Android with Expo Go is the primary target. Reservations and charging use the Node simulator. Activity also offers separate real, read-only Ecurious diagnostics; hardware commands remain unavailable.
+Expo SDK 58, React Native, Expo Router, and TypeScript. Android with Expo Go is the primary target. The map uses shared Supabase software holds; the separate lifecycle rehearsal uses the Node simulator. See the [system design](../docs/SYSTEM-DESIGN.md), [API contracts](../docs/API.md) and [operations](../docs/OPERATIONS.md). Activity also offers separate real, read-only Ecurious diagnostics; hardware commands remain unavailable.
 
 ## Run on your Android phone
 
@@ -36,9 +36,21 @@ Variables beginning with `EXPO_PUBLIC_` are included in the app. Use them for pu
 
 ## GoingElectric map
 
-Open **Map** for native charger markers and station details, without embedding the website. Root `npm start`, `npm run mobile`, `npm run android`, and `npm run ios` accept `ELECTRIC_API_KEY` or `GOINGELECTRIC_API_KEY` from the root `.env`. Starting Expo directly inside `mobile/` instead requires `EXPO_PUBLIC_GOINGELECTRIC_API_KEY` in `mobile/.env`. Never commit keys; restart Expo after changing them.
+First launch offers driver profile setup, with **Explore map first** for browsing. Returning drivers open the full-screen native map. Root `npm start`, `npm run mobile`, `npm run android`, and `npm run ios` accept `ELECTRIC_API_KEY` or `GOINGELECTRIC_API_KEY` from the root `.env`. Starting Expo directly inside `mobile/` instead requires `EXPO_PUBLIC_GOINGELECTRIC_API_KEY` in `mobile/.env`. Never commit keys; restart Expo after changing them.
 
-The initial view is Berlin. Pan and zoom, then select **Search this area**. Power and connector filters refine searches; tapping a marker opens its address, connectors, power, network, reported faults, and a visible GoingElectric entry link. **My location** asks for foreground permission when tapped; declining still allows map browsing. Station faults are directory reports, not live availability. Public stations remain discovery only, without a link to reservable Ecurious hardware.
+The initial view is Berlin. Pan and zoom, then select **Search this area**. **Filters** contains power/connector controls, reported faults, reserved bays with expiry times, and directory-only chargers. The location button is at the lower right. Required Google branding is preserved and the overlays leave it space. Station faults are directory reports, not live availability.
+
+Real public GoingElectric locations are visible by default. A group such as **4 × CCS** creates four virtual app slots. A fresh complete database read makes absent holds unreserved in BayReady. Select one plug and confirm a short hold to block the same slot for other BayReady users. Cancellation is owner-only and expiry uses database time. Physical occupancy and operator availability remain unverified; these numbers are virtual app references. Stale/failed booking reads disable writes. Reserved slots and server deadlines appear in Filters, including owned holds outside the viewport. Operator-approved inventory instead appears as one location marker: choose a bay, then an individual compatible plug before confirming a hold. All plugs on that physical bay share the reservation, while other bays remain independent.
+
+Fictional Berlin test inventory is hidden behind **Show test location**. It has three bays and four plugs, with no public station/hardware mapping. The old simulator remains at `/reserve`, reachable through Activity navigation. Real Ecurious reservations still require the documented live integration.
+
+## Driver profile and connector preference
+
+`/profile` saves name, email, international phone, license plate, preferred connector and a fixed mock payment choice. Android uses SecureStore; the browser preview keeps preferences in memory only. No contact/plate data is uploaded, no real card input is present, and these details are not a verified login. The profile screen can be reopened from the map to edit preferences.
+
+Your saved connector (`CCS`, `Type 2`, or `CHAdeMO`) automatically filters directory requests and registered plugs. Minimum power remains in the dropdown. Returning from profile editing preserves that manual setting. Before confirming a hold, the summary shows the selected plug, masked plate, chosen duration and mock payment. The database receives resource references, duration and request UUID, not the profile.
+
+The Supabase project URL and public key are configured from root `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` (the supplied legacy-anon `SUPABASE_API_KEY` also works). These are passed into public Expo settings; secret/service-role/management keys are rejected or stripped. Guest sessions persist in SecureStore. The hosted schema and anonymous-auth activation are still pending administrator access; follow [Supabase setup](../docs/SUPABASE.md) before expecting booking RPCs to work.
 
 Requests go directly from the phone to GoingElectric. Results are cleared after roughly one hour and rechecked on return to the foreground; source and retrieval time stay visible. The directory key is available to the device for these requests and must be registered for this app. The map needs internet but works independently from the simulator API. [API documentation](https://www.goingelectric.de/stromtankstellen/api/docs/) and [usage terms](https://www.goingelectric.de/stromtankstellen/api/terms/).
 

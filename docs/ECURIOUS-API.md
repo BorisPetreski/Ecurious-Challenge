@@ -14,7 +14,7 @@ https://parking-lock-service-production.up.railway.app
 
 The reference accepts either an `X-API-Key` header or an `apiKey` query parameter. Keep the key in the backend's `ECURIOUS_API_KEY` environment variable and use header authentication for backend requests. Do not put it in `EXPO_PUBLIC_*`, URLs, app source, tracked files, or logs. The service scopes access to locks assigned to the caller's team.
 
-The application integration is a separate, read-only view of assigned locks and status through `GET /api/hardware`. The mobile Activity screen fetches this view; simulator bookings and controls remain explicitly labelled as simulated. Hardware writes remain disabled and the server still runs in mock mode. The user-supplied host name contains `production`; only the challenge-assigned test hardware is in scope.
+The diagnostic integration is a separate, read-only view of assigned locks and status through `GET /api/hardware`. The mobile Activity screen fetches this view; simulator bookings and controls remain explicitly labelled as simulated. The adapter now also provides narrowly named barrier movement methods for an authorised orchestration service. These methods are not booking operations, do not establish physical success, and were tested with mocked requests only. The user-supplied host name contains `production`; only the challenge-assigned test hardware is in scope.
 
 To fetch a redacted status report from the laptop:
 
@@ -90,7 +90,7 @@ The dashboard also reads `whitelist` and `latestPhoto.licensePlate` from lock ob
 
 `GET /api/v1/locks/:id/whitelist` appears in an HTML comment, but has no rendered request/response specification. Its behavior is not verified; do not rely on it as an established endpoint.
 
-## Documented commands; disabled in the initial integration
+## Documented provider commands
 
 | Method and path | Body | Documented physical meaning |
 | --- | --- | --- |
@@ -104,6 +104,39 @@ The dashboard also reads `whitelist` and `latestPhoto.licensePlate` from lock ob
 Command response examples contain `success`, `message`, and `result`. Messages say the command was sent and the barrier is raising or lowering. Treat these as acknowledgements. Keep the UI at **command requested / awaiting observation** until a fresh, authenticated hardware observation confirms the target state.
 
 The unlock example maps numeric `deviceStatus: 2` to lowered and `carPresence: 2` to vacant; the lock example maps `deviceStatus: 1` to raised. These examples do not define a complete numeric enum. Preserve unknown values rather than inferring a physical state.
+
+### Implemented adapter movement boundary
+
+The public service reference was fetched again during the integration work on 24 October 2026. Its lock/unlock payloads and acknowledgement examples remain as described above; occupancy interlocks, command idempotency, and charging control are still undocumented. Only the public reference was fetched for this update. No authenticated read was needed and **no physical command was sent**.
+
+The backend adapter implements these explicit methods:
+
+| Adapter method | Single provider request | Returned projection |
+| --- | --- | --- |
+| `raiseBarrier(lockId)` | `POST /api/v1/locks/:id/lock`, `{ "cancelAutoLift": false }` | Requested target `raised`; acknowledgement only. |
+| `lowerBarrier(lockId)` | `POST /api/v1/locks/:id/unlock`, `{ "cancelAutoLift": false }` | Requested target `lowered`; acknowledgement only. |
+
+Both require a valid assigned-lock ID shape and a configured backend credential. They use header authentication, a six-second timeout, the 1 MiB streamed response bound, and redirect rejection. They send one POST, with no automatic retry or extra motion/status request. They deliberately do not expose arbitrary provider paths, `cancelAutoLift` options, keep-state modes, or whitelist writes. The ambiguous `reserve()` and `release()` adapter methods still refuse: application reservation/cancellation semantics require a separate verified workflow.
+
+The provider must return boolean `success: true` both at the top level and in `result`. A usable acknowledgement returns exactly:
+
+```json
+{
+  "lockId": "lock-demo-1",
+  "requestedBarrier": "raised",
+  "acknowledged": true,
+  "confirmed": false,
+  "requestedAt": "2026-10-24T10:00:00.000Z"
+}
+```
+
+This example uses a fictional lock and time. `requestedAt` is captured before dispatch; it is not a sensor timestamp. Numeric device status, provider messages, serials, raw plates and result bodies are omitted. An acknowledged target must remain pending until a separate, fresh authenticated observation confirms it. The adapter does not perform that confirmation itself.
+
+Missing/negative/malformed acknowledgements, response-size violations, non-auth HTTP errors and network failures throw `EcuriousApiError` with code `ECURIOUS_COMMAND_UNCERTAIN`, `uncertain: true`, and a fixed message requiring status reconciliation. A command timeout returns status `504` and explicitly says movement may already have been accepted; other uncertain outcomes use `502`. A failed command never reuses the read-only timeout wording that no hardware command was sent. HTTP `401`/`403` retain `ECURIOUS_AUTH`; `404` retains `ECURIOUS_NOT_FOUND`; configuration and invalid-ID failures occur before dispatch. No failure or acknowledgement confirms a safe physical position.
+
+The calling service must establish caller authorisation, designated inventory/lock mapping, fresh trusted occupancy, fault/interlock policy, command serialization, durable operation identity, and recovery before invoking these methods. Reconcile uncertain outcomes before further movement. An application lock cannot prevent an external operator, automatic relift, or camera whitelist from moving the barrier; those remain part of the hardware contract to verify.
+
+Focused verification at this boundary passed 38 adapter tests/subtests and a JavaScript syntax check. New mocked cases cover exact command paths/bodies/authentication, ignored numeric-state claims, redacted acknowledgements, validation before dispatch, one-attempt failures, malformed/oversized responses, and timeout uncertainty. They do not establish real movement, occupancy interlocks, charging, or a complete reservation cycle.
 
 ### Whitelist rules persist in hardware
 
@@ -153,7 +186,7 @@ These are contract gaps, not proof that every capability is absent from the wide
 2. Identify the exact assigned test bay, physical layout, sensor behavior, and any accepted GoingElectric/charger mapping. Do not operate unrelated infrastructure.
 3. Confirm occupancy interlocks and safe lock/unlock sequencing, including relift and keep-state behavior. Unknown or stale occupancy must not enable a movement based on a claimed empty bay.
 4. Establish how a booking installs and removes a specific plate rule, how expiry/cancellation restores the agreed configuration, and which actual recognition event proves arrival. Verify the SSE name mismatch with real observations.
-5. Implement backend commands with explicit requested/confirmed/failed/unknown outcomes. Following a timeout, reconcile status before retrying; confirm any supported idempotency mechanism rather than assuming one.
+5. Wire the narrow backend movement methods through an authorised reservation service with explicit requested/confirmed/failed/unknown outcomes. Following a timeout, reconcile status before retrying; confirm any supported provider idempotency mechanism rather than assuming one.
 6. Agree what constitutes real charging evidence. This lock API alone cannot supply it.
 7. Record reserve/protect → recognised arrival → accepted charging evidence → departure/release using fresh hardware observations in `BUILD-LOG.md`. Keep simulator steps labelled, and retain no raw plates, credentials, or camera captures in tracked evidence.
 

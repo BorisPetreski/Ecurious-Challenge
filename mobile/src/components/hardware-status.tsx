@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Link } from 'expo-router';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ActionButton, SectionHeading, ui } from '@/components/bayready-ui';
 import { palette } from '@/constants/bayready';
@@ -112,6 +113,7 @@ export function HardwareStatus() {
         </> : null}
         {!snapshot && loading ? <Text style={ui.body}>Reading the assigned hardware…</Text> : null}
         <ActionButton label={loading ? 'Reading hardware…' : 'Refresh real hardware'} onPress={() => void refresh()} loading={loading} variant="secondary" />
+        <Link href="/hardware" asChild><Pressable accessibilityRole="button" style={({ pressed }) => [ui.button, pressed && ui.pressed]}><Text style={ui.buttonText}>Open designated bay workflow</Text></Pressable></Link>
         <Text style={ui.small}>A fresh service response can still contain stale device telemetry. Unknown or offline state never confirms an empty bay.</Text>
       </View>
     </View>
