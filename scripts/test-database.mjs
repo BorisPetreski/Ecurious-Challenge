@@ -10,6 +10,7 @@ const ownerToken = randomUUID();
 const containerName = `bayready-reservations-test-${process.pid}-${ownerToken.slice(0, 8)}`;
 const ownerLabel = 'com.bayready.test.owner';
 const image = 'postgres:17-alpine';
+const bookingOptionsOnly = process.argv.includes('--booking-options-only');
 const activeChildren = new Set();
 let interrupted = false;
 let cleaningUp = false;
@@ -276,6 +277,112 @@ async function runDirectoryRaces() {
   console.log('PASS directory owner cancellation: other users see the slot unreserved');
 }
 
+async function runHardwareRaces() {
+  const ownerA='a1111111-1111-4111-8111-111111111111';
+  const ownerB='a2222222-2222-4222-8222-222222222222';
+  const location='a0000000-0000-4000-8000-000000000100';
+  const bay='a0000000-0000-4000-8000-000000000001';
+  const connectorA='a0000000-0000-4000-8000-000000000011';
+  const connectorB='a0000000-0000-4000-8000-000000000012';
+  const workerA='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1';
+  const workerB='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2';
+  await executeSql(`
+    insert into auth.users(id) values('${ownerA}'),('${ownerB}');
+    insert into public.charging_locations(id,label) values('${location}','Fictional workflow race location');
+    insert into public.bookable_bays(id,location_id,label,integration_mode,ecurious_lock_id,enabled)
+      values('${bay}','${location}','Fictional workflow race bay','ecurious','fictional-workflow-race-lock',true);
+    insert into public.bay_connectors(id,bay_id,label,connector_type,power_kw,enabled) values
+      ('${connectorA}','${bay}','Race CCS','CCS',150,true),('${connectorB}','${bay}','Race Type2','Typ2',22,true);
+    insert into public.hardware_controls(bay_id,enabled,interlocks_confirmed) values('${bay}',true,true);
+  `,'Create fictional hardware race fixture');
+
+  const userSql=(owner,connector,request,marker)=>`
+    begin; set local role authenticated; set local "request.jwt.claim.sub"='${owner}';
+    select public.request_hardware_reservation('${bay}','${connector}',10,'${request}');
+    ${marker ? `select '${marker}'; select pg_sleep(1);` : ''} commit;`;
+  const first=psql(userSql(ownerA,connectorA,'abbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1','HARDWARE_RESERVATION_LOCKED'),{marker:'HARDWARE_RESERVATION_LOCKED'});
+  await first.markerSeen;
+  const second=psql(userSql(ownerB,connectorB,'abbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2'));
+  const [firstResult,secondResult]=await Promise.all([first.done,second.done]);
+  const workflow=jsonResult(requireSuccess(firstResult,'First hardware intent'));
+  assert.notEqual(secondResult.code,0);
+  assert.match(secondResult.stderr,/HARDWARE_UNAVAILABLE/);
+  const operationId=workflow.operation.id;
+  assert.match(operationId,/^[0-9a-f-]{36}$/i);
+  const claimSql=(worker,marker)=>`
+    begin; set local role service_role;
+    select public.claim_hardware_operation('${worker}','${operationId}');
+    ${marker ? `select '${marker}'; select pg_sleep(1);` : ''} commit;`;
+  const firstClaim=psql(claimSql(workerA,'HARDWARE_CLAIM_LOCKED'),{marker:'HARDWARE_CLAIM_LOCKED'});
+  await firstClaim.markerSeen;
+  const secondClaim=psql(claimSql(workerB));
+  const [claimedResult,unclaimedResult]=await Promise.all([firstClaim.done,secondClaim.done]);
+  const claimed=jsonResult(requireSuccess(claimedResult,'First worker claim'));
+  assert.equal(requireSuccess(unclaimedResult,'Competing worker claim').trim(),'');
+  assert.match(claimed.claimToken,/^[0-9a-f-]{36}$/i);
+  const dispatchSql=(marker)=>`
+    begin; set local role service_role;
+    select public.mark_hardware_dispatch('${operationId}','${claimed.claimToken}',clock_timestamp(),'lowered','vacant',false,'disabled');
+    ${marker ? `select '${marker}'; select pg_sleep(1);` : ''} commit;`;
+  const firstPermit=psql(dispatchSql('HARDWARE_DISPATCH_LOCKED'),{marker:'HARDWARE_DISPATCH_LOCKED'});
+  await firstPermit.markerSeen;
+  const secondPermit=psql(dispatchSql());
+  const [permitResult,deniedResult]=await Promise.all([firstPermit.done,secondPermit.done]);
+  assert.equal(jsonResult(requireSuccess(permitResult,'First dispatch permit')).status,'dispatching');
+  assert.notEqual(deniedResult.code,0);
+  assert.match(deniedResult.stderr,/HARDWARE_CLAIM_INVALID/);
+  const rows=jsonResult(await executeSql(`
+    select jsonb_build_object('holds',(select count(*) from public.booking_reservations where bay_id='${bay}' and status='held'),
+      'operations',(select count(*) from public.hardware_operations where bay_id='${bay}'),
+      'dispatches',(select count(*) from public.hardware_operations where bay_id='${bay}' and dispatched_at is not null));
+  `,'Verify hardware admission/dispatch race rows'));
+  assert.deepEqual(rows,{holds:1,operations:1,dispatches:1});
+  console.log('PASS hardware races: one owner, one worker claim, one durable dispatch permit; no hardware called');
+}
+
+async function runHardwareSlotRaces() {
+  // Reuse the registered fictional race bay. Scheduling an hour ahead must
+  // not mutate its currently quarantined physical operation.
+  const bay = 'a0000000-0000-4000-8000-000000000001';
+  const ownerA = 'a1111111-1111-4111-8111-111111111111';
+  const ownerB = 'a2222222-2222-4222-8222-222222222222';
+  const connectorA = 'a0000000-0000-4000-8000-000000000011';
+  const connectorB = 'a0000000-0000-4000-8000-000000000012';
+  const firstStart = new Date(Date.now() + 3600_000).toISOString();
+  const firstEnd = new Date(Date.parse(firstStart) + 20 * 60_000).toISOString();
+  const request = 'accccccc-cccc-4ccc-8ccc-ccccccccccc1';
+  const sql = (owner, connector, key, start, end, marker) => `
+    begin; set local role authenticated; set local "request.jwt.claim.sub"='${owner}';
+    select public.request_hardware_slot('${bay}','${connector}','${start}','${end}','${key}','${'a'.repeat(64)}','•••11');
+    ${marker ? `select '${marker}'; select pg_sleep(1);` : ''} commit;`;
+  const first = psql(sql(ownerA, connectorA, request, firstStart, firstEnd, 'SCHEDULE_LOCKED'), { marker: 'SCHEDULE_LOCKED' });
+  await first.markerSeen;
+  const competitor = psql(sql(ownerB, connectorB, 'accccccc-cccc-4ccc-8ccc-ccccccccccc2', firstStart, firstEnd));
+  const [won, lost] = await Promise.all([first.done, competitor.done]);
+  const original = jsonResult(requireSuccess(won, 'First scheduled reservation')).slot;
+  assert.notEqual(lost.code, 0);
+  assert.match(lost.stderr, /SLOT_RESERVED/);
+
+  const nextStart = new Date(Date.parse(firstEnd) + 10 * 60_000).toISOString();
+  const nextEnd = new Date(Date.parse(nextStart) + 20 * 60_000).toISOString();
+  const retryKey = 'accccccc-cccc-4ccc-8ccc-ccccccccccc3';
+  const retryFirst = psql(sql(ownerA, connectorA, retryKey, nextStart, nextEnd, 'SCHEDULE_RETRY_LOCKED'), { marker: 'SCHEDULE_RETRY_LOCKED' });
+  await retryFirst.markerSeen;
+  const retrySecond = psql(sql(ownerA, connectorA, retryKey, nextStart, nextEnd));
+  const [one, two] = await Promise.all([retryFirst.done, retrySecond.done]);
+  const bookingOne = jsonResult(requireSuccess(one, 'First scheduled retry')).slot;
+  const bookingTwo = jsonResult(requireSuccess(two, 'Concurrent scheduled retry')).slot;
+  assert.equal(bookingOne.id, bookingTwo.id);
+  assert.equal(Date.parse(bookingOne.startsAt), Date.parse(nextStart));
+  assert.equal(bookingOne.endsAt, bookingTwo.endsAt);
+  assert.notEqual(bookingOne.id, original.id);
+  const counts = jsonResult(await executeSql(`select jsonb_build_object(
+    'scheduled',(select count(*) from public.hardware_slot_bookings where bay_id='${bay}' and source='scheduled'),
+    'operations',(select count(*) from public.hardware_operations where bay_id='${bay}'));`, 'Verify schedule race rows'));
+  assert.deepEqual(counts, { scheduled: 2, operations: 1 });
+  console.log('PASS scheduled-slot races: whole-bay exclusion across plugs; identical retry preserves one window; no early operation');
+}
+
 let failure;
 try {
   await docker(['image', 'inspect', image], `Cached Docker image ${image} is required; run docker pull ${image}`);
@@ -318,11 +425,16 @@ try {
   assert.ok(migrations.length, 'No database migrations found.');
   for (const migration of migrations) {
     await executeSql(await readFile(new URL(migration, migrationDirectory), 'utf8'), `Apply ${migration}`);
-    if (migration === '20261024120000_bayready_reservations.sql') {
+    if (!bookingOptionsOnly && migration === '20261024120000_bayready_reservations.sql') {
       await executeSql(await readFile(new URL('supabase/tests/reservation_contract.sql', root), 'utf8'), 'Original reservation SQL contract assertions');
       await executeSql(await readFile(new URL('supabase/tests/pre_hierarchy_fixture.sql', root), 'utf8'), 'Seed fictional upgrade history');
     }
+    if (!bookingOptionsOnly && migration === '20261024170000_plate_arrival_deadline.sql') {
+      await executeSql(await readFile(new URL('supabase/tests/hardware_slots_contract.sql', root), 'utf8'), 'Original scheduled-slot lifecycle before option upgrade');
+    }
   }
+  await executeSql(await readFile(new URL('supabase/tests/booking_options_contract.sql', root), 'utf8'), 'Fixed-price booking options and safe physical fallback');
+  if (!bookingOptionsOnly) {
   await executeSql(
     await readFile(new URL('supabase/tests/hierarchy_contract.sql', root), 'utf8'),
     'Location, bay and connector SQL assertions',
@@ -331,9 +443,16 @@ try {
     await readFile(new URL('supabase/tests/directory_contract.sql', root), 'utf8'),
     'App-only directory hold SQL assertions',
   );
+  await executeSql(
+    await readFile(new URL('supabase/tests/hardware_contract.sql', root), 'utf8'),
+    'Durable hardware workflow SQL assertions',
+  );
   console.log('PASS migrations, auth/permissions, ownership, cancellation, expiry, and validation');
   await runRaces();
   await runDirectoryRaces();
+  await runHardwareRaces();
+  await runHardwareSlotRaces();
+  } else console.log('PASS seven migrations and targeted booking-option contracts; no hardware called');
 } catch (error) {
   failure = error;
 } finally {

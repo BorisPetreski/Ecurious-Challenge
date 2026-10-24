@@ -11,6 +11,8 @@ Implementation snapshot: 24 October 2026. The source brief provides challenge re
 | Understand database tables, transactions and access | [Database design](DATABASE.md) |
 | Apply the hosted Supabase setup | [Supabase setup](SUPABASE.md) |
 | Implement a client or inspect requests and responses | [API reference](API.md) |
+| Activate the guarded designated hardware workflow | [Hardware enrollment/setup](HARDWARE-SETUP.md), [blocked bays and no-shows](BAY-LIFECYCLE.md) |
+| Understand scheduled booking, plate entry, accounts and session duration | [Scheduled sessions](SCHEDULED-SESSIONS.md) |
 | Work on the real hardware integration | [Integration guide](INTEGRATION.md) and [observed Ecurious contract](ECURIOUS-API.md) |
 | Check what was actually observed, tested or unsuccessful | [Build log](BUILD-LOG.md) |
 | Prepare the team, demo or submission | [Team preparation](TOMORROW.md), [pitch](PITCH.md), [challenge brief](../source/challenge-brief.pdf) |
@@ -25,3 +27,5 @@ Implementation snapshot: 24 October 2026. The source brief provides challenge re
 - **Proposed:** a product or deployment decision still to be agreed or implemented.
 
 The migrations and mobile booking clients are prepared and locally testable. Hosted Supabase activation still requires administrator access; no document should be read as evidence that the cloud setup or full physical charging cycle has been completed. Follow the latest evidence in the build log.
+
+The guarded hardware workflow is implemented with commands disabled by default. Its fourth migration and backend/private-key enrollment are part of the pending hosted setup. No physical command or full live cycle has been verified.

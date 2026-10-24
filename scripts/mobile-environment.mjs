@@ -17,7 +17,7 @@ export function mobileEnvironment(env) {
   delete result.GOINGELECTRIC_API_KEY;
   delete result.ELECTRIC_API_KEY;
   for (const name of Object.keys(result)) {
-    if (name.startsWith('SUPABASE_')) delete result[name];
+    if (name.startsWith('SUPABASE_') || name.startsWith('BAYREADY_')) delete result[name];
   }
   const supabaseUrl = env.EXPO_PUBLIC_SUPABASE_URL || env.SUPABASE_URL;
   if (supabaseUrl) result.EXPO_PUBLIC_SUPABASE_URL = supabaseUrl.trim();

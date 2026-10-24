@@ -32,13 +32,16 @@ The mobile app uses Expo SDK 58, React Native, Expo Router, and TypeScript. It c
 - Individually selectable directory app slots: an unreserved listed plug can receive a shared software hold that blocks the same slot for other BayReady users.
 - Supabase booking integration prepared for registered bays, shared holds, expiry and owner-only cancellation; hosted migration/auth setup pending.
 - Native reservation screen and activity timeline backed by the local simulator.
-- Separate read-only Ecurious hardware panel in Activity, using the backend's `.env` key.
+- Separate read-only Ecurious diagnostics and a designated-bay protect/entry/release screen.
+- Guarded durable hardware commands with worker claims, sensor confirmation, blocked-state recovery and no-show cleanup intents; activation remains pending.
 - Fictional station cards with one reservable demo bay.
 - Reserve, simulated plate check, simulated charging, departure, and release.
 - No-show expiry, blocked-bay scenarios, low-confidence recognition, and capability-driven controls.
 - Typed API client with bounded requests and polling while the app is active.
 
-Hardware reservation and charging actions remain simulated, and live hardware mode refuses startup. Shared database holds allocate software resources only. Real Ecurious reads show assigned hardware, connectivity, last-seen time, occupancy, faults, and camera access policy in Activity. Stale or offline reports show current physical state as unknown. No barrier commands or whitelist changes are exposed. The Map tab uses a native map with direct GoingElectric API requests, visible attribution, retrieval time, and station links. Directory stations never automatically map to the designated Ecurious test bay.
+The Node lifecycle rehearsal remains simulated. A separate guarded Ecurious workflow is implemented for explicitly enrolled test bays, with commands **off by default**. It needs the fourth migration, a backend-only Supabase server key, operator enrollment/interlock confirmation and an assigned-lock allowlist before activation. No physical movement or complete live cycle has been verified. See [hardware setup](docs/HARDWARE-SETUP.md) and [blocked-bay/no-show behavior](docs/BAY-LIFECYCLE.md).
+
+Activity diagnostics use real Ecurious reads. Stale/offline readings remain unknown. The dedicated hardware screen separates booking state, command acknowledgement and physical observations; unknown delivery stays quarantined. The native map still retrieves GoingElectric directly with source/time/entry links. Directory app slots do not automatically map to Ecurious hardware.
 
 Put the registered GoingElectric app key in the root `.env` as `ELECTRIC_API_KEY` (also accepts `GOINGELECTRIC_API_KEY`). Root launchers pass this directory key to the phone for direct requests. It stays out of tracked source; it is available on the end device. Restart Expo after key changes. The opening map fills the screen; use **Filters** for connector/power, reported faults, reserved bays/deadlines, and directory-only chargers. The location control sits at the lower right. The initial view is Berlin, not a detected location. Required basemap branding remains visible; no website is embedded.
 
@@ -46,7 +49,7 @@ First launch offers profile setup with name, email, phone, plate, connector and 
 
 The map shows real GoingElectric locations and their listed plugs by default. After a fresh database read, plugs without active BayReady holds start unreserved in the app. Choose a plug, review the masked vehicle/mock payment and duration, then confirm a shared hold. Other BayReady users cannot reserve the same app slot until cancellation or server expiry. Physical occupancy and operator availability remain unverified. Directory counts define virtual app slots, not assigned physical bay IDs.
 
-Separately, registered bays are grouped by location; choosing one of their connectors holds the whole physical bay in the app inventory. Shared booking code and three schema migrations are prepared for the supplied Supabase project; hosted activation still needs administrator access. Follow [the setup and reservation model](docs/SUPABASE.md). Fictional test inventory is optional in Filters; the independent local simulator remains at `/reserve`.
+Separately, registered bays are grouped by location; choosing one of their connectors holds the whole physical bay in the app inventory. Shared booking code and four schema migrations are prepared for the supplied Supabase project; hosted activation still needs administrator access. Follow [the setup and reservation model](docs/SUPABASE.md). Fictional test inventory is optional in Filters; the independent local simulator remains at `/reserve`.
 
 Set `ECURIOUS_API_KEY` in the root `.env` and restart `npm start` to enable hardware diagnostics. The supplied challenge service is the default origin; `ECURIOUS_BASE_URL` can override it with an HTTPS origin. The key stays on the backend and is removed from the Expo child process environment. Run `npm run hardware:inspect` for the same redacted, read-only report in the terminal. See the [verified Ecurious API contract and observations](docs/ECURIOUS-API.md).
 
@@ -82,7 +85,8 @@ The standalone browser demo is available at http://127.0.0.1:3000 while the API 
 | `supabase/migrations/` | Reviewed database schema and atomic booking functions |
 | `mobile/app.json` | Expo app configuration |
 | `server.mjs` and `lib/simulator.mjs` | Local API and reservation rules |
-| `lib/ecurious-adapter.mjs` | Backend-only real hardware reads; writes deliberately unavailable |
+| `lib/ecurious-adapter.mjs` | Backend-only reads and single-attempt lock/unlock command adapter |
+| `lib/hardware-workflow.mjs` and `lib/hardware-store.mjs` | Authenticated intents, durable claims, guarded dispatch and reconciliation |
 | `public/` | Original browser prototype |
 
 ## Team and submission references
@@ -99,6 +103,6 @@ The repository is [BorisPetreski/Ecurious-Challenge](https://github.com/BorisPet
 
 ## Integration priorities
 
-The updated key authenticated for team `E-Indifferent` and `lock-0001`. Initial hardware reads were offline with a lowering-stall error; a later report said raised/vacant without active errors, then aged beyond the display freshness window. Existing wildcard plate access remains configured. Ask the Ecurious mentors to confirm current connectivity, occupancy interlocks, relift behavior, specific-plate access, actual event delivery, and accepted charging evidence before enabling movement. Connect one full real reservation cycle before adding extra features. A polished app is optional in the brief; a working hardware integration is required for top ranks.
+The latest read-only check authenticated team `E-Indifferent` with three assigned locks. At `2026-10-24T10:54:04.599Z`, `lock-0001` was offline, `lock-0002` had a recent raised/vacant report, and `lock-0003` was stale. All reported wildcard camera access. These are dated observations, not current-state guarantees or confirmed physical bay mappings. Ask the Ecurious mentors to confirm current connectivity, occupancy interlocks, relift behavior, specific-plate access, actual event delivery, and accepted charging evidence before enabling movement. Connect one full real reservation cycle before adding extra features. A polished app is optional in the brief; a working hardware integration is required for top ranks.
 
 Source references: [GoingElectric API documentation](https://www.goingelectric.de/stromtankstellen/api/docs/), [GoingElectric API terms](https://www.goingelectric.de/stromtankstellen/api/terms/), and [Expo documentation](https://docs.expo.dev/). Product defaults and hypothetical pricing remain proposals for the team.

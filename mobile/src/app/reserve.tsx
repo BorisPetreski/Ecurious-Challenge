@@ -153,6 +153,7 @@ export default function ReserveScreen() {
       </View>
 
       <View>
+        {state?.reservation?.status === 'charging' ? <Link href={{ pathname: '/session', params: { simulator: '1' } }} asChild><Pressable accessibilityRole="button" style={styles.mapLink}><View style={ui.flex}><Text style={styles.mapLinkTitle}>Open simulated session</Text><Text style={ui.small}>Elapsed duration and rehearsal state</Text></View><Text style={styles.mapLinkArrow}>↗</Text></Pressable></Link> : null}
         <SectionHeading eyebrow="DISCOVERY PREVIEW" title="Places to plug in" />
         <Link href="/map" asChild>
           <Pressable accessibilityRole="link" style={({ pressed }) => [styles.mapLink, pressed && ui.pressed]}>

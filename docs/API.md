@@ -4,11 +4,11 @@ This reference describes the checked-in implementation. There are three separate
 
 | Path | Authority and current status |
 | --- | --- |
-| Phone → local Node `/api/*` | One in-memory simulator, plus a separate real read-only Ecurious diagnostic view. Reservation and charging writes are simulated. |
+| Phone → local Node `/api/*` | One in-memory simulator, read-only diagnostics, and an authenticated designated-bay workflow. Physical commands default off; simulation writes remain separate. |
 | Phone → Supabase Auth and RPCs | Prepared shared software holds for registered demo bays and separate directory-derived virtual app slots. Hosted migrations and anonymous-auth activation remain pending; no fallback booking is fabricated. |
 | Phone → GoingElectric | Direct directory lookup and on-device derivation of virtual app choices. A directory result does not establish a physical bay/plug identity, occupancy, or charging-session state. |
 
-These paths do not share reservation IDs or perform an atomic transaction across services. A Supabase hold does not reserve the simulator bay or move an Ecurious barrier. See [database contracts](DATABASE.md), [Supabase deployment/setup](SUPABASE.md), and the [Ecurious provider contract](ECURIOUS-API.md).
+These paths do not share reservation IDs or perform an atomic transaction across services. Directory/demo holds do not reserve the simulator bay or move an Ecurious barrier. Explicitly enrolled hardware bays instead use the durable command workflow below. See [database contracts](DATABASE.md), [Supabase deployment/setup](SUPABASE.md), and the [Ecurious provider contract](ECURIOUS-API.md).
 
 ## Local Node HTTP API
 
@@ -16,7 +16,7 @@ Source: [`server.mjs`](../server.mjs), [`lib/simulator.mjs`](../lib/simulator.mj
 
 The default origin is `http://127.0.0.1:3000`. `npm start` and `npm run server:lan` intentionally bind the development server to `0.0.0.0` for phone access; the phone uses the laptop's LAN address. `PORT` changes the port. The mobile client accepts an origin-only `EXPO_PUBLIC_API_URL`; otherwise it derives a development host from Expo and uses `EXPO_PUBLIC_API_PORT` or `3000`. Android emulator fallback is `10.0.2.2`.
 
-The local API has **no client authentication or user isolation**. Clients reaching this process share one simulator and can read its hardware diagnostics. It is a laptop development service, not a deployed multi-user booking backend. There is no browser CORS configuration; native phone requests do not require it. `ECURIOUS_MODE` values other than `mock` refuse startup.
+The simulator and diagnostic routes have **no client authentication or user isolation**. Clients reaching this process share one simulator and can read its hardware diagnostics. The separate hardware booking routes require a verified Supabase guest JWT and database ownership. It is a laptop development service, not a deployed multi-user booking backend. There is no browser CORS configuration; native phone requests do not require it. `ECURIOUS_MODE` values other than `mock` refuse startup.
 
 | Method and exact path | Body | Successful status and response |
 | --- | --- | --- |
@@ -25,10 +25,13 @@ The local API has **no client authentication or user isolation**. Clients reachi
 | `GET /api/hardware` | None | `200`, redacted `HardwareSnapshot` below. No hardware write. |
 | `POST /api/reservations` | `{ "plate": "M-DEMO-42", "holdMinutes": 10 }` | `201`, updated `ReservationState`. Creates a simulator hold only. |
 | `POST /api/actions` | `{ "action": "..." }`, with arrival fields when needed | `200`, updated `ReservationState`. Simulator actions only. |
+| `GET /api/hardware/bookings` | None; bearer guest JWT when activated | `200`, designated workflow snapshot; disabled setup is public. |
+| `POST /api/hardware/bookings` | Registered bay/connector, duration, request UUID | `202`, current workflow snapshot after durable reservation intent. |
+| `POST /api/hardware/actions` | Entry/release intent with bay and own reservation UUID | `202`, current workflow snapshot after durable action intent. |
 
-There are no local individual-booking, individual-hardware, plate-recognition, directory-proxy, or Supabase-proxy routes. `EcuriousAdapter.getStatus()` and `getLatestPlate()` are backend methods; they are not exposed as extra HTTP endpoints.
+There are no raw individual-hardware movement, plate-recognition or directory-proxy routes. Hardware booking routes forward a narrow authenticated intent; they are not a general Supabase proxy. `EcuriousAdapter.getStatus()` and `getLatestPlate()` are backend methods; they are not exposed as extra HTTP endpoints.
 
-POST requests require `Content-Type: application/json` (a charset parameter is accepted), a JSON object, and at most **8 KiB** of body bytes. Known routes called with another method return `405` and an `Allow` header. This includes `HEAD` and `OPTIONS` on API routes. Unknown `/api/*` paths return `404`. No query parameters are consumed. Successful and error JSON responses use `Content-Type: application/json; charset=utf-8` and `Cache-Control: no-store`.
+POST requests require `Content-Type: application/json` (a charset parameter is accepted), a JSON object, and at most **8 KiB** of body bytes. Known routes called with another method return `405` and an `Allow` header. This includes `HEAD` and `OPTIONS` on API routes. `/api/hardware/bookings` permits `GET, POST`; `/api/hardware/actions` permits `POST`. Unknown `/api/*` paths return `404`. No query parameters are consumed. Successful and error JSON responses use `Content-Type: application/json; charset=utf-8` and `Cache-Control: no-store`.
 
 ### Simulator reservation and state
 
@@ -97,7 +100,7 @@ type HardwareSnapshot = {
     barrier: 'raised' | 'lowered' | 'unknown';
     occupancy: 'vacant' | 'occupied' | 'unknown';
     lastReportedPresence: 'vacant' | 'occupied' | 'unknown';
-    activeErrors: string[]; waterIngress: boolean | null;
+    activeErrors: string[]; faultsKnown: boolean; waterIngress: boolean | null;
     battery12V: number | null; battery3_7V: number | null; signalStrength4G: number | null;
     whitelist: { mode: 'any-plate' | 'specific-plates' | 'disabled' | 'unknown'; count: number | null };
     plateObservation: { detected: boolean; timestamp: string | null } | null;
@@ -107,7 +110,7 @@ type HardwareSnapshot = {
 
 With no configured key, this route returns `200` with `configured: false`, `team: null`, and `locks: []`, without a network request. Configured failures return errors rather than a fabricated empty assignment. At most 100 lock records are accepted. Raw plates, whitelist entries, camera captures, serials, and arbitrary upstream fields are omitted.
 
-`status` and `lastReportedPresence` retain the report; derived current state becomes unknown for offline/unknown status or missing, future, or older-than-60-second telemetry. A moving barrier is never rendered as a confirmed raised/lowered position. The **60-second window is a local display policy**, not a verified hardware guarantee. The mobile panel further ages retained snapshots and marks them unknown after refresh failure. It fetches on mount and manual refresh; its five-second timer updates display age only, without hardware polling. No SSE consumer or movement/whitelist write is connected to the app.
+`status` and `lastReportedPresence` retain the report; derived current state becomes unknown for offline/unknown status or missing, future, or older-than-60-second telemetry. A moving barrier is never rendered as a confirmed raised/lowered position. The **60-second window is a local display policy**, not a verified hardware guarantee. The mobile panel further ages retained snapshots and marks them unknown after refresh failure. It fetches on mount and manual refresh; its five-second timer updates display age only, without hardware polling. The diagnostic route itself performs no writes and there is no SSE consumer. Guarded movement uses the separate workflow below; whitelist writes are not implemented.
 
 ### Local errors
 
@@ -136,6 +139,60 @@ All handled local failures use this shape, with the HTTP status on the response:
 Adapter configuration errors use `ECURIOUS_CONFIGURATION`/`503` and normally prevent server startup. Adapter direct methods can also produce `ECURIOUS_LOCK_ID`/`400` or `ECURIOUS_NOT_CONFIGURED`/`503`; there is no HTTP route for those methods, and the unconfigured list route instead returns the configuration state above.
 
 The phone's simulator client validates the complete response, exposes `ReservationApiError` with `code`, `message` and optional `status`, and adds client-only `INVALID_CONFIGURATION`, `INVALID_RESPONSE`, `HTTP_ERROR`, `REQUEST_TIMEOUT`, or `NETWORK_ERROR`. Caller cancellation produces `AbortError`. Hardware-client failures are displayed as fixed messages and do not use the simulator state's schema. Failed writes are not automatically retried: a timeout can occur after a simulator mutation completed.
+
+## Designated hardware booking API
+
+Sources: [hardware workflow](../lib/hardware-workflow.mjs), [backend Supabase transport](../lib/hardware-store.mjs), [mobile client](../mobile/src/lib/hardware-workflow-api.ts), [hardware hook](../mobile/src/hooks/use-hardware-workflows.ts) and [fourth migration](../supabase/migrations/20261024150000_hardware_workflow.sql). Activation and recovery requirements are in [HARDWARE-SETUP.md](HARDWARE-SETUP.md).
+
+These routes are guarded by backend configuration and an assigned-lock allowlist. The phone supplies a Supabase user JWT in `Authorization: Bearer <user-token>`. The backend forwards it with the public project key to authenticated intent RPCs; Supabase verifies identity and ownership. The separate worker uses only its backend secret/service-role key. No private key or phone-supplied lock ID is accepted as user authorization.
+
+A disabled `GET` returns `{source:'ecurious',commandsEnabled:false,reason:'HARDWARE_SETUP_REQUIRED',serverNow,workflows:[],observations:[]}` without requiring guest auth. Enabled reads require auth. `POST` while disabled returns `503`; missing/malformed bearer auth while activated returns `401`. The mobile client may retry an unauthenticated GET once with its restored guest token; it never automatically retries a write.
+
+```ts
+// POST /api/hardware/bookings
+{ bayId: string, connectorId: string, holdMinutes: 5 | 10 | 15, requestId: string }
+// POST /api/hardware/actions
+{ action: 'entry' | 'release', bayId: string, reservationId: string }
+```
+
+IDs are UUIDs. `release` is an owner cancellation/cleanup intent, not a direct unlock. Both successful POSTs return HTTP **202**, even when movement is still queued or uncertain. A committed intent followed by a failed read can produce an error: reconcile by GET before another action. These legacy immediate/manual routes omit profile/plate/payment data. New plate-bound bookings use the scheduled routes below; manual entry refuses those reservations.
+
+```ts
+type WorkflowSnapshot = {
+  source: 'ecurious'; commandsEnabled: boolean; reason: string | null;
+  serverNow: string;
+  workflows: {
+    serverNow: string;
+    bay: { id: string; label: string; lockId: string; connectors: BayConnector[] };
+    reservation: { id: string | null; isMine: boolean; expiresAt: string | null };
+    phase: 'idle' | 'protect_pending' | 'protecting' | 'protected'
+      | 'entry_pending' | 'entering' | 'entry_open'
+      | 'release_pending' | 'releasing' | 'blocked' | 'uncertain';
+    reason: string | null;
+    operation: null | {
+      id: string; kind: 'protect' | 'entry' | 'release';
+      target: 'raised' | 'lowered';
+      status: 'queued' | 'claimed' | 'dispatching' | 'acknowledged'
+        | 'uncertain' | 'confirmed' | 'cancelled';
+      requestedAt: string; dispatchedAt: string | null;
+    };
+    capabilities: { canReserve: boolean; canRequestEntry: boolean; canRequestRelease: boolean };
+  }[];
+  observations: HardwareSnapshot['locks'];
+};
+```
+
+The database also projects operator configuration and last stored observation metadata; the current mobile client uses the fields above. Other users see the deadline but not the reservation owner/ID. `observations` are separate current diagnostic reads and can be old, unknown or unavailable despite a successful application read. Hardware callbacks/capabilities do not establish verified LPR arrival or charging.
+
+The worker claims through service-role-only RPCs, then commits a fenced single dispatch permit after current mapping and fresh/vacant/stable/fault/access checks. Predispatch claims may expire after 30 seconds and rotate their token; dispatched operations are never reclaimed. The observation policy defaults to 5 seconds, configurable by an administrator within 1–15 seconds. A response delayed beyond this age causes no POST and leaves the permit unresolved. Explicit fault-list presence (`faultsKnown`) and a known false water-ingress flag are required by the worker.
+
+The adapter maps `raiseBarrier(id)` to provider `POST /api/v1/locks/:id/lock` and `lowerBarrier(id)` to `/unlock`, each with `{cancelAutoLift:false}`. Acknowledgement is `{lockId,requestedBarrier,acknowledged:true,confirmed:false,requestedAt}`. The service validates it and durably records it. Confirmation of dispatched movement requires a strictly newer provider observation and the target state. An already-correct claimed target can complete without movement.
+
+No-ACK delivery uncertainty is quarantined even when a later GET matches: an old process could still resume after its permit and send late. Operator recovery must stop dispatchers/in-flight requests before resolving that state; neither timer expiry nor a general app button clears it. Known acknowledgements survive failed polling and can later be confirmed through reads. Entry can observe occupancy after acknowledged opening without claiming a plate match; release still requires vacancy. See [database invariants](DATABASE.md).
+
+Public database RPCs are `list_hardware_workflows`, `get_hardware_workflow`, `request_hardware_reservation`, `request_hardware_entry` and `request_hardware_release`. Private worker RPCs are `list_hardware_operations`, `claim_hardware_operation`, `mark_hardware_dispatch`, `record_hardware_result` and `reconcile_hardware_deadlines`. Helpers and private tables have no phone grants. Generic demo reserve/cancel cannot expire or free hardware-backed holds, and generic map inventory excludes Ecurious rows.
+
+Handled failures use the existing Node `{error:{code,message}}` envelope. Hardware configuration/schema failures return `503`; booking auth failures `401`; fixed semantic conflicts/refusals `409`; malformed user input `400`; bounded store/provider failures `502`/`504`. Worker errors never forward raw provider bodies or JWTs. The client polls every five foreground seconds, pauses actions after fifteen seconds without a successful read, serializes writes and reads after every mutation outcome. These policies do not replace physical interlocks.
 
 ## Supabase booking RPC client
 

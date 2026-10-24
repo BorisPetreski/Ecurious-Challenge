@@ -6,6 +6,7 @@ import { createSimulator, DomainError } from './lib/simulator.mjs';
 import { EcuriousAdapter, EcuriousApiError } from './lib/ecurious-adapter.mjs';
 import { HardwareWorkflowError, SupabaseHardwareStore } from './lib/hardware-store.mjs';
 import { HardwareWorkflowService } from './lib/hardware-workflow.mjs';
+import { HardwareSlotService, reservationQuote, RESERVATION_POLICY } from './lib/hardware-slots.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const MAX_BODY_BYTES = 8 * 1024;
@@ -56,7 +57,7 @@ function isWithin(root, target) {
 }
 
 /** Exported for an HTTP smoke test without binding a production port. */
-export function createServer({ simulator = createSimulator(), hardware = new EcuriousAdapter(), hardwareWorkflow = null, publicDir = resolve(ROOT, 'public') } = {}) {
+export function createServer({ simulator = createSimulator(), hardware = new EcuriousAdapter(), hardwareWorkflow = null, hardwareSlots = null, publicDir = resolve(ROOT, 'public') } = {}) {
   return createHttpServer(async (request, response) => {
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader('Referrer-Policy', 'no-referrer');
@@ -77,6 +78,24 @@ export function createServer({ simulator = createSimulator(), hardware = new Ecu
             source: 'ecurious', commandsEnabled: false, reason: 'HARDWARE_SETUP_REQUIRED',
             serverNow: new Date().toISOString(), workflows: [], observations: [],
           });
+        } else if (request.method === 'GET' && url.pathname === '/api/hardware/slots') {
+          const token = request.headers.authorization?.replace(/^Bearer /i, '');
+          json(response, 200, hardwareSlots ? await hardwareSlots.snapshot(token, url.searchParams.get('bayId')) : {
+            configured: false, serverNow: new Date().toISOString(), slots: [], policy: RESERVATION_POLICY,
+          });
+        } else if (request.method === 'POST' && url.pathname === '/api/hardware/quote') {
+          json(response, 200, hardwareSlots ? hardwareSlots.quote(await readJson(request)) : reservationQuote(await readJson(request)));
+        } else if (request.method === 'POST' && ['/api/hardware/slots', '/api/hardware/slots/cancel', '/api/hardware/slots/extend'].includes(url.pathname)) {
+          if (!hardwareSlots?.configured) throw new HardwareWorkflowError('HARDWARE_SETUP_REQUIRED', 'Scheduled hardware bookings are not activated on this backend.', 503);
+          const authorization = request.headers.authorization;
+          if (typeof authorization !== 'string' || !/^Bearer [A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/i.test(authorization)) {
+            throw new HardwareWorkflowError('AUTH_REQUIRED', 'Use your authenticated app booking session for time-slot bookings.', 401);
+          }
+          const token = authorization.slice(7);
+          const body = await readJson(request);
+          json(response, 202, url.pathname === '/api/hardware/slots' ? await hardwareSlots.reserve(token, body)
+            : url.pathname === '/api/hardware/slots/extend' ? await hardwareSlots.extend(token, body) : await hardwareSlots.cancel(token, body));
+          void hardwareWorkflow?.tick();
         } else if (request.method === 'POST' && ['/api/hardware/bookings', '/api/hardware/actions'].includes(url.pathname)) {
           if (!hardwareWorkflow?.configured) throw new HardwareWorkflowError('HARDWARE_SETUP_REQUIRED', 'Designated hardware control is not activated on this backend.', 503);
           const authorization = request.headers.authorization;
@@ -91,8 +110,8 @@ export function createServer({ simulator = createSimulator(), hardware = new Ecu
           json(response, 201, simulator.reserve(await readJson(request)));
         } else if (request.method === 'POST' && url.pathname === '/api/actions') {
           json(response, 200, simulator.action(await readJson(request)));
-        } else if (['/api/state', '/api/health', '/api/hardware', '/api/reservations', '/api/actions', '/api/hardware/bookings', '/api/hardware/actions'].includes(url.pathname)) {
-          const allow = url.pathname === '/api/hardware/bookings' ? 'GET, POST' : ['/api/state', '/api/health', '/api/hardware'].includes(url.pathname) ? 'GET' : 'POST';
+        } else if (['/api/state', '/api/health', '/api/hardware', '/api/reservations', '/api/actions', '/api/hardware/bookings', '/api/hardware/actions', '/api/hardware/slots', '/api/hardware/slots/cancel', '/api/hardware/slots/extend', '/api/hardware/quote'].includes(url.pathname)) {
+          const allow = ['/api/hardware/bookings', '/api/hardware/slots'].includes(url.pathname) ? 'GET, POST' : ['/api/state', '/api/health', '/api/hardware'].includes(url.pathname) ? 'GET' : 'POST';
           json(response, 405, { error: { code: 'METHOD_NOT_ALLOWED', message: 'This route does not support that method.' } }, { Allow: allow });
         } else {
           json(response, 404, { error: { code: 'NOT_FOUND', message: 'API route not found.' } });
@@ -169,13 +188,20 @@ export function start({ env = process.env } = {}) {
     publicKey: env.SUPABASE_PUBLISHABLE_KEY || env.SUPABASE_ANON_KEY || env.SUPABASE_API_KEY,
     serverKey: env.SUPABASE_SECRET_KEY || env.SUPABASE_SERVICE_ROLE_KEY,
   });
+  const hardwareSlots = new HardwareSlotService({
+    store, hardware, commandsEnabled: rawCommandsEnabled === 'true', plateHashKey: env.BAYREADY_PLATE_HASH_KEY,
+    lockIds: (env.ECURIOUS_LOCK_IDS ?? '').split(',').map(id => id.trim()).filter(Boolean),
+  });
   const hardwareWorkflow = new HardwareWorkflowService({
+    slots: hardwareSlots,
     store, hardware, commandsEnabled: rawCommandsEnabled === 'true',
     lockIds: (env.ECURIOUS_LOCK_IDS ?? '').split(',').map(id => id.trim()).filter(Boolean),
   });
   if (rawCommandsEnabled === 'true' && !hardwareWorkflow.configured) throw new HardwareWorkflowError('HARDWARE_CONFIGURATION',
     'Hardware control needs a backend Supabase server key, project settings, Ecurious key and explicit assigned lock IDs.', 503);
-  const server = createServer({ hardware, hardwareWorkflow });
+  if (rawCommandsEnabled === 'true' && !hardwareSlots.configured) throw new HardwareWorkflowError('HARDWARE_CONFIGURATION',
+    'Scheduled hardware bookings need a stable backend-only BAYREADY_PLATE_HASH_KEY.', 503);
+  const server = createServer({ hardware, hardwareWorkflow, hardwareSlots });
   server.on('close', () => hardwareWorkflow.stop());
   server.listen(Number(rawPort), host, () => {
     const localHost = host === '0.0.0.0' ? '127.0.0.1' : host;

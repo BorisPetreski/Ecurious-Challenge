@@ -14,7 +14,7 @@ https://parking-lock-service-production.up.railway.app
 
 The reference accepts either an `X-API-Key` header or an `apiKey` query parameter. Keep the key in the backend's `ECURIOUS_API_KEY` environment variable and use header authentication for backend requests. Do not put it in `EXPO_PUBLIC_*`, URLs, app source, tracked files, or logs. The service scopes access to locks assigned to the caller's team.
 
-The diagnostic integration is a separate, read-only view of assigned locks and status through `GET /api/hardware`. The mobile Activity screen fetches this view; simulator bookings and controls remain explicitly labelled as simulated. The adapter now also provides narrowly named barrier movement methods for an authorised orchestration service. These methods are not booking operations, do not establish physical success, and were tested with mocked requests only. The user-supplied host name contains `production`; only the challenge-assigned test hardware is in scope.
+The diagnostic integration is a separate, read-only view of assigned locks and status through `GET /api/hardware`. The mobile Activity screen fetches this view; simulator bookings and controls remain explicitly labelled as simulated. The adapter also provides narrowly named barrier movement and single-plate access methods, plus private plate/policy comparison reads, for an authorised orchestration service. These methods are not booking operations, do not establish physical success, and their writes were tested with mocked requests only. The user-supplied host name contains `production`; only the challenge-assigned test hardware is in scope.
 
 To fetch a redacted status report from the laptop:
 
@@ -24,7 +24,7 @@ npm run hardware:inspect
 
 The command loads the backend `.env` without printing its contents. Backend requests use a six-second timeout, a 1 MiB response cap, and redirect rejection. The Expo launcher excludes `ECURIOUS_API_KEY` from its child environment. Diagnostic output contains selected fields, whitelist mode/count, and plate-observation metadata; raw plates, camera captures, upstream bodies, and credential echoes are excluded.
 
-The adapter preserves `status` and `lastReportedPresence` as last-reported values. It derives `barrier`, `occupancy`, and `telemetryFresh` using a **60-second local display policy**: missing/future/stale timestamps and offline/unknown status produce unknown current state. This interval is not an Ecurious guarantee or permission to move hardware. A successful fetch does not reset the provider observation's age.
+The adapter preserves `status` and `lastReportedPresence` as last-reported values. `faultsKnown` distinguishes an explicit fault array from missing/malformed fault telemetry; the control worker also requires a known false water-ingress flag. It derives `barrier`, `occupancy`, and `telemetryFresh` using a **60-second local display policy**: missing/future/stale timestamps and offline/unknown status produce unknown current state. This interval is not an Ecurious guarantee or permission to move hardware. A successful fetch does not reset the provider observation's age.
 
 ## Observed during initial discovery
 
@@ -64,6 +64,36 @@ The empty error list and later raised report do not establish how the earlier mo
 
 At this integration checkpoint, 45 Node tests passed, including 24 adapter tests/subtests; JavaScript syntax and mobile TypeScript checks passed. Android bundle export also succeeded before subsequent custom-map work began. The adapter tests use fictional fixtures and mocked fetches. They cover header authentication, privacy projection, stale/unknown state, schema and ID validation, sanitized failures, timeout/size limits, missing configuration, and refused writes. These checks do not prove a physical hardware cycle or on-phone rendering.
 
+### Plate-lifecycle contract recheck
+
+The public root reference was fetched again, followed by bounded authenticated GETs on 24 October 2026. No whitelist or movement POST was sent. The current list fetched at `11:27:36.084Z` returned three assigned camera-equipped locks:
+
+| Lock | Reported barrier / occupancy | Last seen | Reported access and recognition |
+| --- | --- | --- | --- |
+| `lock-0001` | `raised` / `vacant` | `11:26:49.207Z` | Wildcard access; latest recognition `09:58:00.896Z`, a historical observation. |
+| `lock-0002` | `raised` / `vacant` | `11:26:24.220Z` | Wildcard access; latest-recognition endpoint returned 404. |
+| `lock-0003` | `raised` / `vacant` | `11:26:29.240Z` | Wildcard access; latest-recognition endpoint returned 404. |
+
+Every record used **`carPresence: "vacant"` as a string**. There was no `carPresent` boolean field. The follow-up numeric fields were `deviceStatusRaw: 1` and `carPresenceRaw: 2`; these examples are not a complete numeric enum. Do not coerce the string to a boolean: both `"vacant"` and `"occupied"` are truthy JavaScript strings. The adapter accepts the documented occupancy strings and preserves unfamiliar/boolean/raw-only observations as unknown.
+
+All three error lists were present and empty at that snapshot; `faultsKnown` distinguishes an explicitly supplied empty list from missing/malformed fault telemetry. These device observations were already older than the workflow's default five-second preflight policy; an HTTP 200 alone does not make them current.
+
+A five-second SSE observation at `11:28:30.130Z` used header authentication and returned HTTP 200 with 86 bytes: only `connected`, containing `status` and `timestamp`. No plate, occupancy, movement or alarm event was observed. The reference/dashboard event-name discrepancy remains unresolved. No raw plate, image, credential, or upstream response body was printed or saved by these probes.
+
+## Later read-only assignment checkpoint
+
+At `2026-10-24T10:54:04.599Z`, the redacted CLI list read returned team `E-Indifferent` with three assigned locks. This supersedes the initial one-lock assignment snapshot; it is not evidence of current physical mapping or an authorized movement test.
+
+| Lock | Report at this checkpoint | Provider timestamp |
+| --- | --- | --- |
+| `lock-0001` | Offline; derived barrier/occupancy unknown; retained vacant report | `2026-10-24T10:29:56.817Z` |
+| `lock-0002` | Raised/vacant, fresh under the 60-second diagnostic display rule | `2026-10-24T10:53:57.139Z` |
+| `lock-0003` | Reported raised/vacant but stale; derived current state unknown | `2026-10-24T10:51:25.111Z` |
+
+All three reported camera capability, no listed active errors and wildcard access. Recognition metadata was historical or absent; no raw plate or image was printed. The worker's default five-second policy is stricter than the diagnostic display window. Wildcard access fails protection preflight, and no lock was automatically enrolled or commanded.
+
+The guarded application integration is now described in [HARDWARE-SETUP.md](HARDWARE-SETUP.md), [API.md](API.md) and [BAY-LIFECYCLE.md](BAY-LIFECYCLE.md). Its database/backend/mobile code is implemented locally; hosted activation, actual movement, plate correlation and the full live cycle remain unverified.
+
 ## Documented read endpoints
 
 | Method and path | Documented response | Notes |
@@ -80,7 +110,7 @@ Documented lock fields include:
 | `id`, `name`, `serialHex` | Lock identity and hardware serial |
 | `hasCamera` | Whether the lock has the recognition camera |
 | `status` | `raised` or `lowered`; barrier position, not booking status |
-| `carPresence` | `vacant` or `occupied`; keep missing or unfamiliar values unknown |
+| `carPresence` | String `vacant` or `occupied`; no `carPresent` boolean observed. Keep missing or unfamiliar values unknown. |
 | `battery12V`, `battery3_7V` | Device battery readings |
 | `signalStrength4G` | Cellular signal telemetry; scale is not defined in the reference |
 | `waterIngress`, `activeErrors` | Hardware fault information |
@@ -116,7 +146,7 @@ The backend adapter implements these explicit methods:
 | `raiseBarrier(lockId)` | `POST /api/v1/locks/:id/lock`, `{ "cancelAutoLift": false }` | Requested target `raised`; acknowledgement only. |
 | `lowerBarrier(lockId)` | `POST /api/v1/locks/:id/unlock`, `{ "cancelAutoLift": false }` | Requested target `lowered`; acknowledgement only. |
 
-Both require a valid assigned-lock ID shape and a configured backend credential. They use header authentication, a six-second timeout, the 1 MiB streamed response bound, and redirect rejection. They send one POST, with no automatic retry or extra motion/status request. They deliberately do not expose arbitrary provider paths, `cancelAutoLift` options, keep-state modes, or whitelist writes. The ambiguous `reserve()` and `release()` adapter methods still refuse: application reservation/cancellation semantics require a separate verified workflow.
+Both require a valid assigned-lock ID shape and a configured backend credential. They use header authentication, a six-second timeout, the 1 MiB streamed response bound, and redirect rejection. They send one POST, with no automatic retry or extra motion/status request. They deliberately do not expose arbitrary provider paths, `cancelAutoLift` options or keep-state modes. Separate narrow plate-access methods are described below; arbitrary lists and wildcard writes remain unavailable. The ambiguous `reserve()` and `release()` adapter methods still refuse: application reservation/cancellation semantics require a separate verified workflow.
 
 The provider must return boolean `success: true` both at the top level and in `result`. A usable acknowledgement returns exactly:
 
@@ -147,7 +177,35 @@ The reference says the camera EEPROM accepts up to ten specific plate entries. A
 - `{ "plates": [] }` disables automatic plate-triggered lowering.
 - The dashboard represents wildcard access as `*` or a wildcard-labelled value.
 
-Writing a whitelist changes future physical access. It is not a read-only recognition check or a booking with an automatic expiry. Confirm format, overwrite behavior, retention, rollback, and timeout cleanup before using it for a reservation. Do not change the existing wildcard configuration during exploration.
+Writing a whitelist changes future physical access. It is not a read-only recognition check or a booking with an automatic expiry. No per-plate deadline, server-side expiry, deduplication rule, stable event ID, or atomic whitelist-and-barrier command is documented. Matching is described as automatic in hardware; that does not establish the timing, freshness, or uniqueness of a later server recognition event. Confirm overwrite behavior, accepted plate formats, retention, rollback and timeout cleanup with mentors before the physical demo. Existing wildcard configuration was left unchanged by exploration.
+
+### Narrow plate access methods
+
+| Adapter method | Single provider request | Redacted acknowledgement |
+| --- | --- | --- |
+| `setPlateAccess(lockId, normalizedPlate)` | `POST /api/v1/locks/:id/whitelist`, `{ "plates": ["[FICTIONAL-PLATE]"] }` | `{lockId, requestedAccess:"specific-plates", acknowledged:true, confirmed:false, requestedAt}`. |
+| `clearPlateAccess(lockId)` | Same endpoint, `{ "plates": [] }` | Same projection with `requestedAccess:"disabled"`. |
+
+The setter accepts one already-normalized NFKC uppercase string of 2–15 Unicode letters/digits, with no spaces, hyphens, wildcard or arbitrary extra entries. The orchestration service normalizes and fingerprints driver input before calling it. This bounded application format is not evidence that every country/character is supported by the camera.
+
+The provider response must contain `success: true` and an exactly matching `whitelist` echo. Even then, `confirmed` stays false: an echoed configuration is not independent proof of EEPROM programming or actual recognition behavior. The request body, echoed plates and provider messages are not returned or logged. Both methods inherit the single-attempt timeout/size/authentication/error rules above. A timeout while clearing leaves future access **unknown**, not disabled; an unresolved policy write must keep the bay quarantined rather than being blindly repeated or offered to another driver.
+
+### Private plate and access-policy comparisons
+
+These backend methods expose no raw plate or whitelist entries. Neither is a public HTTP route:
+
+| Method | Input | Output |
+| --- | --- | --- |
+| `getPlateMatch(lockId, {expectedFingerprint, comparePlate, notBefore})` | Lowercase 64-hex fingerprint, private comparator closure, and a required timestamp boundary. Fetches `GET /api/v1/locks/:id/plate/latest`. | `{lockId, timestamp, matched}`; timestamp may be null when no event exists. |
+| `getPlateAccessMatch(lockId, {expectedFingerprint, comparePlate})` | Same private fingerprint/comparator. Fetches `GET /api/v1/locks/:id`. | `{lockId, accessMode, matched, observedAt}`; `observedAt` is the provider's nullable `lastSeenAt`. |
+
+`comparePlate(rawObservation, expectedFingerprint)` is trusted backend code holding the secret needed for HMAC/timing-safe comparison; the adapter requires a boolean result and sanitizes callback exceptions. The expected fingerprint and secret never leave this private comparison boundary in responses. The application must not use an unkeyed public hash as a substitute for its secret comparison policy.
+
+Recognition must have the requested `lockId`, a valid timestamp **strictly newer** than `notBefore`, and no future timestamp relative to the backend clock before the comparator can run. Set the boundary from the booking and relevant plate/protection operation; record consumed observations durably so one old event cannot satisfy another reservation. A matching historical `latestPhoto` alone is never used. A 404 recognition read becomes `{timestamp:null, matched:false}` for the private method only; it cannot establish vacancy, departure, or a no-show. Wrong-lock or malformed responses remain errors. The existing public `getLatestPlate()` still returns only detection presence/time and retains its 404 error behavior.
+
+Policy matching is true only for **exactly one** allowed plate that matches the expected fingerprint. Wildcard, multiple entries, disabled and malformed/unknown lists cannot verify that exclusive policy. `observedAt` is the device last-seen field, not a dedicated EEPROM-write timestamp. The caller must separately require valid current telemetry, observation ordering and persisted command acknowledgement; a policy comparison by itself is not a movement permit or proof of hardware programming.
+
+The intended orchestration is specific plate policy → verified protection/raise → a new matching recognition and observed automatic lowering → observed occupancy → observed departure → remove plate access and verify barrier down before freeing the app resource. If expiry happens before arrival, remove access and safely restore the agreed idle-open state. Occupied or uncertain bays remain held for recovery. No-show timing and deduplication belong to the application database because the provider exposes neither booking expiry nor event replay guarantees. Real charging still needs separate agreed evidence.
 
 ## SSE contracts disagree with dashboard code
 

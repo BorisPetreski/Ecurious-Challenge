@@ -52,12 +52,33 @@ function connector(value: unknown): value is BayConnector {
 function workflow(value: unknown): value is HardwareWorkflow {
   if (!record(value) || !record(value.bay) || !record(value.reservation) || !record(value.capabilities)) return false;
   const { bay, reservation, operation, capabilities } = value;
-  return timestamp(value.serverNow) && uuid(bay.id) && typeof bay.label === 'string' && typeof bay.lockId === 'string' && Array.isArray(bay.connectors) && bay.connectors.every(connector) &&
+  const valid = timestamp(value.serverNow) && uuid(bay.id) && typeof bay.label === 'string' && typeof bay.lockId === 'string' && Array.isArray(bay.connectors) && bay.connectors.every(connector) &&
     (reservation.id === null || uuid(reservation.id)) && typeof reservation.isMine === 'boolean' && nullableTime(reservation.expiresAt) &&
     (!reservation.isMine || uuid(reservation.id)) && (reservation.isMine || reservation.id === null) &&
     phases.includes(value.phase as HardwarePhase) && nullableText(value.reason) &&
     ['canReserve', 'canRequestEntry', 'canRequestRelease'].every(key => typeof capabilities[key] === 'boolean') &&
     (operation === null || (record(operation) && uuid(operation.id) && ['protect', 'entry', 'release'].includes(operation.kind as string) && ['raised', 'lowered'].includes(operation.target as string) && operationStates.includes(operation.status as string) && timestamp(operation.requestedAt) && nullableTime(operation.dispatchedAt)));
+  if (!valid) return false;
+  if (new Set((bay.connectors as BayConnector[]).map(item => item.id)).size !== (bay.connectors as BayConnector[]).length) return false;
+  const hasReservation = reservation.expiresAt !== null;
+  if (reservation.isMine && !hasReservation) return false;
+  if (value.phase === 'idle' && (hasReservation || reservation.isMine || reservation.id !== null)) return false;
+  if (capabilities.canReserve && (value.phase !== 'idle' || hasReservation || capabilities.canRequestEntry || capabilities.canRequestRelease)) return false;
+  if (capabilities.canRequestEntry && (value.phase !== 'protected' || !reservation.isMine || !uuid(reservation.id) || !timestamp(reservation.expiresAt) || Date.parse(reservation.expiresAt) <= Date.parse(value.serverNow as string))) return false;
+  if (capabilities.canRequestRelease && (!reservation.isMine || !uuid(reservation.id))) return false;
+  if (record(operation)) {
+    if (operation.target !== (operation.kind === 'protect' ? 'raised' : 'lowered')) return false;
+    const requested = Date.parse(operation.requestedAt as string);
+    const serverNow = Date.parse(value.serverNow as string);
+    if (requested > serverNow) return false;
+    if (operation.dispatchedAt !== null) {
+      const dispatched = Date.parse(operation.dispatchedAt as string);
+      if (dispatched < requested || dispatched > serverNow) return false;
+    }
+    if (['queued', 'claimed', 'cancelled'].includes(operation.status as string) && operation.dispatchedAt !== null) return false;
+    if (['dispatching', 'acknowledged'].includes(operation.status as string) && operation.dispatchedAt === null) return false;
+  }
+  return true;
 }
 
 function observation(value: unknown): value is HardwareLock {
@@ -70,9 +91,18 @@ function observation(value: unknown): value is HardwareLock {
     (value.plateObservation === null || (record(value.plateObservation) && typeof value.plateObservation.detected === 'boolean' && nullableTime(value.plateObservation.timestamp)));
 }
 
-function snapshot(value: unknown): value is HardwareWorkflowSnapshot {
-  return record(value) && value.source === 'ecurious' && typeof value.commandsEnabled === 'boolean' && nullableText(value.reason) && timestamp(value.serverNow) &&
-    Array.isArray(value.workflows) && value.workflows.length <= 50 && value.workflows.every(workflow) && Array.isArray(value.observations) && value.observations.length <= 50 && value.observations.every(observation);
+export function isHardwareWorkflowSnapshot(value: unknown): value is HardwareWorkflowSnapshot {
+  if (!(record(value) && value.source === 'ecurious' && typeof value.commandsEnabled === 'boolean' && nullableText(value.reason) && timestamp(value.serverNow) &&
+    Array.isArray(value.workflows) && value.workflows.length <= 50 && value.workflows.every(workflow) && Array.isArray(value.observations) && value.observations.length <= 50 && value.observations.every(observation)
+  )) return false;
+  const workflows = value.workflows as HardwareWorkflow[];
+  const observations = value.observations as HardwareLock[];
+  if (!value.commandsEnabled && (workflows.length || observations.length)) return false;
+  if (new Set(workflows.map(item => item.bay.id)).size !== workflows.length || new Set(workflows.map(item => item.bay.lockId)).size !== workflows.length) return false;
+  const connectors = workflows.flatMap(item => item.bay.connectors.map(plug => plug.id));
+  if (new Set(connectors).size !== connectors.length) return false;
+  const operations = workflows.flatMap(item => item.operation ? [item.operation.id] : []);
+  return new Set(operations).size === operations.length && new Set(observations.map(item => item.id)).size === observations.length;
 }
 
 let readNeedsAuth = false;
@@ -101,7 +131,7 @@ async function request(path: string, { body, signal, authenticated = false }: { 
       const message = record(data) && record(data.error) && typeof data.error.message === 'string' && data.error.message.length <= 500 ? data.error.message : `The hardware workflow returned HTTP ${response.status}. Refresh its status before another action.`;
       throw new HardwareWorkflowError(message, code);
     }
-    if (!snapshot(data)) throw new HardwareWorkflowError('The laptop returned an unsupported hardware workflow. Update and restart the backend.');
+    if (!isHardwareWorkflowSnapshot(data)) throw new HardwareWorkflowError('The laptop returned an unsupported hardware workflow. Update and restart the backend.');
     return data;
   } catch (error) {
     if (signal?.aborted) { const cancelled = new Error('Request cancelled'); cancelled.name = 'AbortError'; throw cancelled; }

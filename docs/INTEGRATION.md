@@ -2,7 +2,7 @@
 
 For the full architecture, screen flows, allocation domains and design decisions, read [SYSTEM-DESIGN.md](SYSTEM-DESIGN.md). Exact HTTP/RPC contracts are in [API.md](API.md), storage/transaction rules in [DATABASE.md](DATABASE.md), and setup/recovery in [OPERATIONS.md](OPERATIONS.md).
 
-The primary application is an Expo mobile app in `mobile/`, connected over HTTP to the in-memory Node simulator. The original browser demo remains in `public/`. A separate backend-only Ecurious adapter now provides real read-only hardware diagnostics in Activity. Reservation and charging writes remain simulated; live mode is unavailable. The app must not report a physical action as complete on the strength of a UI click or an unconfirmed command response. See [the actual API contract and observations](ECURIOUS-API.md).
+The primary application is Expo mobile, with direct GoingElectric discovery and Supabase app holds. The local Node server hosts the independent simulator, read-only hardware diagnostics and a guarded designated-bay command worker. That worker is implemented but commands remain off by default until hosted setup, private credentials, confirmed enrollment/interlocks and an allowlist are ready. Charging remains simulated; scheduled hardware entry now uses private fresh plate matching and sensor-confirmed arrival/departure, with physical verification still pending. See [hardware setup](HARDWARE-SETUP.md), [bay lifecycle](BAY-LIFECYCLE.md) and [actual provider observations](ECURIOUS-API.md).
 
 ## Architecture
 
@@ -11,20 +11,21 @@ flowchart LR
   Driver[Expo mobile UI] --> Local[Local Node reservation API]
   Browser[Original browser demo] --> Local
   Local --> Sim[In-memory simulator today]
-  Local -->|Separate read-only diagnostics| Adapter[Ecurious adapter]
-  Adapter -->|Authenticated GET only| Server[Ecurious test server]
+  Local -->|Diagnostics and enrolled-bay worker| Adapter[Ecurious command and read adapter]
+  Adapter -->|GET and guarded command POST| Server[Ecurious test server]
   Server --> Bay[Reservation hardware and camera]
   Browser -->|Direct user-device request with approved key| GE[GoingElectric discovery API]
   Driver -->|Direct device request with registered app key| GE
   Driver -->|Guest auth and booking RPCs| Supabase[Supabase app holds: hosted setup pending]
   Driver --> Profile[Native SecureStore driver profile]
+  Local -->|Caller JWT intents and private worker RPCs| Supabase
 ```
 
-GoingElectric location/connector data and Ecurious bay occupancy have different sources. Add an explicit mapping from the mentor-confirmed station/EVSE/bay to the designated test hardware. Never enable reservations on arbitrary directory results merely because they appear nearby.
+GoingElectric location/connector data and Ecurious bay occupancy have different sources. Add an explicit mapping from the mentor-confirmed station/EVSE/bay to the designated test hardware. Never turn a directory app slot into a physical command merely because it appears nearby.
 
 The opening map uses Supabase for two separate application allocation domains: shared virtual slots for listed GoingElectric plugs, and administrator-approved location/bay/connector inventory. The schema/clients are prepared; applying the hosted migrations and enabling anonymous auth still require administrator access. See [Supabase setup and reservation flow](SUPABASE.md). BayReady holds are application state, not physical occupancy or an Ecurious command acknowledgement. The only seeded physical inventory is an explicitly fictional demo location. Both Supabase domains are independent of the original simulator at `/reserve`.
 
-The normalized registered inventory is `charging_locations` → `bookable_bays` → `bay_connectors`. A reservation records its selected connector but locks the whole bay. Directory groups instead generate opaque virtual slot references for `directory_plug_reservations`. A fresh successful hold query makes an absent app hold unreserved; a stale/failed query leaves status unknown. A slot hold excludes another BayReady booking for that slot, without inventing physical identity or vacancy. Public locations are shown by default; fictional test inventory is opt-in. First-launch profile data stays in device SecureStore; its connector preference controls filtering and its masked vehicle/mock payment appear in confirmation. Contact details and raw plates are not sent to Supabase or hardware.
+The normalized registered inventory is `charging_locations` → `bookable_bays` → `bay_connectors`. A reservation records its selected connector but locks the whole bay. Directory groups instead generate opaque virtual slot references for `directory_plug_reservations`. A fresh successful hold query makes an absent app hold unreserved; a stale/failed query leaves status unknown. A slot hold excludes another BayReady booking for that slot, without inventing physical identity or vacancy. Public locations are shown by default; fictional test inventory is opt-in. First-launch profile data stays in device SecureStore; its connector preference controls filtering and its masked vehicle/mock payment appear in confirmation. Profile contacts stay local. A scheduled hardware booking sends its plate transiently to Node; Supabase stores only its keyed fingerprint and masked suffix. Optional chosen account email goes directly to Supabase Auth.
 
 `npm start` starts Expo and binds the mock API to `0.0.0.0` for phone access. The standalone server still defaults to loopback; `npm run server:lan` intentionally exposes this local simulator to the LAN. Native fetch does not need browser CORS settings. See `mobile/README.md` for address overrides and same-network setup.
 
@@ -50,16 +51,17 @@ The simulator's authorization transition lowers its virtual barrier before recor
 
 The local freshness window is 60 seconds, a display policy rather than a verified safety threshold. Offline, unknown, missing, future-dated or old telemetry never becomes current vacancy or barrier position. The mobile panel also ages out retained snapshots and marks state unknown after refresh failures. Service response time and the provider's `lastSeenAt` remain separate. The app does not consume SSE yet: a bounded probe received only `connected`, and the public reference disagrees with dashboard listener names.
 
-## Implement the real adapter in this order
+## Guarded hardware integration
 
-1. Read `lib/ecurious-adapter.mjs` and `docs/ECURIOUS-API.md`. Authenticated list, individual status and redacted latest-recognition reads are implemented; reserve/release still refuse. These internal method names are not provider booking resources.
-2. Add server-side configuration for the documented URL, authentication, bay ID, and timeouts. Keep credentials out of browser bundles, logs, URLs, and tracked files. `npm start`, `npm run dev`, and `npm run doctor` load an optional `.env`; `.env.example` contains no credentials.
-3. Verify read-only diagnostics against reconnected hardware. Preserve unknown/stale state and observation time. Distinguish occupancy, barrier position, booking status, and charging evidence.
-4. Implement reserve/cancel or release using the **documented meanings**. Separate an accepted command from confirmed hardware state. After a timeout, reconcile status before retrying; use documented idempotency support where available.
-5. Consume the actual plate event feed. Validate its source, reject duplicate/out-of-order events, correlate bay and booking, and keep confidence/manual fallback visible. Do not expose the simulator's arbitrary `arrive` endpoint as a trusted live camera feed.
-6. Wire a live reservation orchestration service to the adapter; adding writes to the existing read-only adapter does not connect Supabase holds or make the simulator live. Remove the startup refusal only after the service, capabilities, UI labels, and event source are genuinely connected.
-7. Keep the database authoritative for competing application holds and trusted hardware authoritative for physical observations. Persistent atomic app allocation is already prepared; live operation additionally needs enrolled mappings, durable hardware-operation history, restart recovery and reconciled command/expiry processing.
-8. Record a full live cycle and two edge cases in `BUILD-LOG.md`. Distinguish real sensor evidence from simulated inputs in the pitch.
+The adapter implements authenticated reads and `raiseBarrier`/`lowerBarrier`. Each movement sends one POST and returns an acknowledgement with `confirmed:false`. Ambiguous `reserve`/`release` adapter methods still refuse: application ownership and sequencing belong in the durable backend workflow. The fifth migration adds scheduled bay windows and private plate matching; see [scheduled sessions](SCHEDULED-SESSIONS.md).
+
+The dedicated `/hardware` screen uses authenticated Node booking/action routes. Registered Ecurious bays are excluded from the generic demo map inventory RPC and require operator enrollment; no public station is automatically assigned hardware. See [API.md](API.md) for routes and [DATABASE.md](DATABASE.md) for transaction/role rules.
+
+The worker validates team assignment, allowlist, current mapping, fresh vacant/stable telemetry, known fault reporting and operator-confirmed configuration before a movement. Protection also requires plate auto-access disabled. A short fenced claim can be replaced before dispatch; a committed dispatch permit is never retried or reclaimed. Freshness is checked again after the permit response. Only a durable acknowledgement and a strictly newer target observation can confirm a dispatched movement. Matching pre-existing state can complete a claimed operation without a POST.
+
+No-ACK uncertainty stays quarantined even when a later GET matches, because a paused process could still send late. Recovery requires stopping dispatchers and inspecting/reconciling the hardware. Cancellation and expiry record cleanup intent and retain the whole-bay hold until confirmed vacant/lowered cleanup. A newer occupied report rejects an older vacant permit; conflicting same-time observations require a newer sample. The API provides no documented external fencing/idempotency, so the software does not promise exactly-once physical delivery.
+
+Activation steps and operator recovery are in [HARDWARE-SETUP.md](HARDWARE-SETUP.md). The current environment has not enabled commands, and no physical POST was sent. A future full cycle still needs trusted plate events and accepted charging evidence. Resolve the SSE name mismatch, event ordering/authenticity, whitelist lifecycle, safe relift/interlock behavior and actual test-bay mapping with mentors. Keep the simulator's arbitrary arrival controls separate from trusted events and record supervised evidence in [BUILD-LOG.md](BUILD-LOG.md).
 
 ## Product rules to discuss with the team
 

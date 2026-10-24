@@ -1,6 +1,6 @@
 # BayReady mobile
 
-Expo SDK 58, React Native, Expo Router, and TypeScript. Android with Expo Go is the primary target. The map uses shared Supabase software holds; the separate lifecycle rehearsal uses the Node simulator. See the [system design](../docs/SYSTEM-DESIGN.md), [API contracts](../docs/API.md) and [operations](../docs/OPERATIONS.md). Activity also offers separate real, read-only Ecurious diagnostics; hardware commands remain unavailable.
+Expo SDK 58, React Native, Expo Router, and TypeScript. Android with Expo Go is the primary target. The map uses shared Supabase software holds; the separate lifecycle rehearsal uses the Node simulator. See the [system design](../docs/SYSTEM-DESIGN.md), [API contracts](../docs/API.md) and [operations](../docs/OPERATIONS.md). Activity offers real read-only diagnostics and links to the guarded `/hardware` workflow. Physical commands default off and require [operator setup](../docs/HARDWARE-SETUP.md).
 
 ## Run on your Android phone
 
@@ -42,7 +42,7 @@ The initial view is Berlin. Pan and zoom, then select **Search this area**. **Fi
 
 Real public GoingElectric locations are visible by default. A group such as **4 × CCS** creates four virtual app slots. A fresh complete database read makes absent holds unreserved in BayReady. Select one plug and confirm a short hold to block the same slot for other BayReady users. Cancellation is owner-only and expiry uses database time. Physical occupancy and operator availability remain unverified; these numbers are virtual app references. Stale/failed booking reads disable writes. Reserved slots and server deadlines appear in Filters, including owned holds outside the viewport. Operator-approved inventory instead appears as one location marker: choose a bay, then an individual compatible plug before confirming a hold. All plugs on that physical bay share the reservation, while other bays remain independent.
 
-Fictional Berlin test inventory is hidden behind **Show test location**. It has three bays and four plugs, with no public station/hardware mapping. The old simulator remains at `/reserve`, reachable through Activity navigation. Real Ecurious reservations still require the documented live integration.
+Fictional Berlin test inventory is hidden behind **Show test location**. It has three bays and four plugs, with no public station/hardware mapping. The old simulator remains at `/reserve`, reachable through Activity navigation. Real Ecurious reservations use the dedicated hardware screen after confirmed enrollment and activation; directory slots never execute barrier commands.
 
 ## Driver profile and connector preference
 
@@ -61,3 +61,5 @@ Requests go directly from the phone to GoingElectric. Results are cleared after 
 If Expo loads but the app cannot reach the simulator, confirm both processes are running, check the API address, and allow local-network traffic through the laptop firewall if prompted. Venue Wi-Fi may isolate devices; a shared phone hotspot is an alternative. An Expo tunnel forwards Metro, not the separate simulator API, so a tunnel alone does not fix API access.
 
 If Expo Go reports a version mismatch, install the matching SDK 58 Expo Go release from [Expo's download page](https://expo.dev/go). No Android Studio or native build is required for this starter.
+
+The designated screen separates durable booking state, command acknowledgement and current sensor observations. Owner entry is manual, not plate verification. Unknown command delivery requires operator recovery; an elapsed countdown does not release its physical guard. See [blocked bays and no-shows](../docs/BAY-LIFECYCLE.md).

@@ -195,6 +195,9 @@ function getClient(): SupabaseClient {
   return client;
 }
 
+/** Account screens reuse the booking session and its native secure persistence. */
+export function getBookingAccountClient(): SupabaseClient { return getClient(); }
+
 export function setBookingAuthActive(active: boolean): void {
   if (!BOOKINGS_CONFIGURED) return;
   const auth = getClient().auth;

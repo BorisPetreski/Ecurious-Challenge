@@ -19,6 +19,7 @@ create table public.hardware_controls (
   release_reason text check (release_reason in ('cancel','no_show','expired')),
   entry_requested boolean not null default false,
   observed_at timestamptz,
+  observation_conflict boolean not null default false,
   barrier text not null default 'unknown' check (barrier in ('raised','lowered','unknown')),
   occupancy text not null default 'unknown' check (occupancy in ('vacant','occupied','unknown')),
   faulted boolean not null default true,
@@ -86,7 +87,7 @@ returns jsonb language sql security definer set search_path='' as $$
     'phase',c.phase,'reason',c.reason,
     'controlsEnabled',c.enabled,'interlocksConfirmed',c.interlocks_confirmed,
     'telemetryMaxAgeMs',c.telemetry_max_age_ms,
-    'observation',pg_catalog.jsonb_build_object('observedAt',c.observed_at,'barrier',c.barrier,
+    'observation',pg_catalog.jsonb_build_object('observedAt',c.observed_at,'conflicted',c.observation_conflict,'barrier',c.barrier,
       'occupancy',c.occupancy,'faulted',c.faulted,'accessMode',c.access_mode),
     'operation',case when o.id is null then null else pg_catalog.jsonb_build_object(
       'id',o.id,'kind',o.kind,'target',o.target,'status',o.status,
@@ -324,13 +325,17 @@ begin
     or p_observed_at<v_now-pg_catalog.make_interval(secs=>v_control.telemetry_max_age_ms/1000.0)
     or p_barrier is null or p_barrier not in ('raised','lowered') or p_barrier=v_op.target
     or p_occupancy is distinct from 'vacant' or p_faulted is distinct from false
+    or (v_control.observed_at is not null and (p_observed_at<v_control.observed_at
+      or (p_observed_at=v_control.observed_at and (v_control.observation_conflict
+        or (p_barrier,p_occupancy,p_faulted,case when p_access_mode in ('disabled','specific-plates','any-plate') then p_access_mode else 'unknown' end)
+          is distinct from (v_control.barrier,v_control.occupancy,v_control.faulted,v_control.access_mode)))))
     or (v_op.kind='protect' and p_access_mode is distinct from 'disabled') then
     raise exception 'HARDWARE_PREFLIGHT_REJECTED';
   end if;
   update public.hardware_operations set status='dispatching',dispatched_at=v_now,claim_expires_at=null where id=v_op.id;
   update public.hardware_controls set phase=case v_op.kind when 'protect' then 'protecting'
     when 'entry' then 'entering' else 'releasing' end,reason='WAITING_FOR_CONFIRMATION',
-    observed_at=p_observed_at,barrier=p_barrier,occupancy=p_occupancy,faulted=false,
+    observed_at=p_observed_at,observation_conflict=false,barrier=p_barrier,occupancy=p_occupancy,faulted=false,
     access_mode=case when p_access_mode in ('disabled','specific-plates','any-plate') then p_access_mode else 'unknown' end,
     updated_at=v_now where bay_id=v_bay_id;
   return public._hardware_operation_json(v_op.id);
@@ -362,10 +367,18 @@ begin
   v_reason:=case when p_reason~'^[A-Z][A-Z0-9_]{0,79}$' then p_reason else 'HARDWARE_STATE_UNRESOLVED' end;
   v_fresh:=coalesce(p_observed_at<=v_now and p_observed_at>=v_now-pg_catalog.make_interval(secs=>v_control.telemetry_max_age_ms/1000.0)
     and p_barrier in ('raised','lowered') and p_occupancy in ('vacant','occupied')
-    and (v_control.observed_at is null or p_observed_at>=v_control.observed_at),false);
+    and (v_control.observed_at is null or p_observed_at>v_control.observed_at
+      or (p_observed_at=v_control.observed_at and not v_control.observation_conflict
+        and (p_barrier,p_occupancy,coalesce(p_faulted,true),case when p_access_mode in ('disabled','specific-plates','any-plate') then p_access_mode else 'unknown' end)
+          is not distinct from (v_control.barrier,v_control.occupancy,v_control.faulted,v_control.access_mode))),false);
+  if p_observed_at=v_control.observed_at
+    and (p_barrier,p_occupancy,coalesce(p_faulted,true),case when p_access_mode in ('disabled','specific-plates','any-plate') then p_access_mode else 'unknown' end)
+      is distinct from (v_control.barrier,v_control.occupancy,v_control.faulted,v_control.access_mode) then
+    update public.hardware_controls set observation_conflict=true where bay_id=v_bay_id;
+  end if;
   if p_observed_at is not null and p_observed_at<=v_now
-    and (v_control.observed_at is null or p_observed_at>=v_control.observed_at) then
-    update public.hardware_controls set observed_at=p_observed_at,
+    and (v_control.observed_at is null or p_observed_at>v_control.observed_at) then
+    update public.hardware_controls set observed_at=p_observed_at,observation_conflict=false,
       barrier=case when p_barrier in ('raised','lowered') then p_barrier else 'unknown' end,
       occupancy=case when p_occupancy in ('vacant','occupied') then p_occupancy else 'unknown' end,
       faulted=coalesce(p_faulted,true),
@@ -385,7 +398,7 @@ begin
     and (p_occupancy='vacant' or (v_op.kind='entry' and v_op.dispatched_at is not null and p_occupancy='occupied'))
     and v_control.enabled and v_control.interlocks_confirmed;
   if v_op.dispatched_at is not null then
-    v_good:=v_good and p_observed_at>=v_op.dispatched_at and v_op.acknowledged_at is not null;
+    v_good:=v_good and p_observed_at>v_op.dispatched_at and v_op.acknowledged_at is not null;
   end if;
 
   if v_outcome='confirmed' and v_good then

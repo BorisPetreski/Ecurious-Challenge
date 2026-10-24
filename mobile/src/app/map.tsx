@@ -592,8 +592,8 @@ export default function MapScreen() {
       </View> : null}
 
       <View style={[styles.navigation, { bottom: navigationBottom, left: insets.left + 16 }]}>
+        <Link href="/hardware" asChild><Pressable accessibilityRole="button" accessibilityLabel="Reserve now or book ahead at a hardware bay" style={({ pressed }) => [styles.navButton, styles.navPrimary, pressed && ui.pressed]}><Text style={[styles.navButtonText, styles.navPrimaryText]}>Book a bay</Text></Pressable></Link>
         <Link href="/profile" asChild><Pressable accessibilityRole="button" style={({ pressed }) => [styles.navButton, pressed && ui.pressed]}><Text style={styles.navButtonText}>Profile</Text></Pressable></Link>
-        <Link href="/activity" asChild><Pressable accessibilityRole="button" style={({ pressed }) => [styles.navButton, pressed && ui.pressed]}><Text style={styles.navButtonText}>Activity</Text></Pressable></Link>
       </View>
       <Pressable accessibilityRole="button" accessibilityLabel="Center map on my location" accessibilityState={{ disabled: locating, busy: locating }} disabled={locating} onPress={() => void locate()} style={({ pressed }) => [styles.locationButton, { bottom: navigationBottom, right: insets.right + 16 }, locating && styles.disabled, pressed && ui.pressed]}>
         {locating ? <ActivityIndicator color={palette.ink} size="small" /> : <Text style={styles.locationMark}>◎</Text>}
@@ -723,6 +723,7 @@ const styles = StyleSheet.create({
   cancelButton: { minHeight: 43, alignItems: 'center', justifyContent: 'center', backgroundColor: palette.soft, borderWidth: 1, borderColor: palette.line, borderRadius: 13 },
   cancelButtonText: { fontSize: 13, color: palette.ink, fontWeight: '700' },
   navigation: { position: 'absolute', flexDirection: 'row', gap: 8 },
+  navPrimary: { backgroundColor: palette.ink }, navPrimaryText: { color: palette.paper },
   navButton: { minHeight: 46, paddingHorizontal: 15, alignItems: 'center', justifyContent: 'center', borderRadius: 23, backgroundColor: palette.paper, elevation: 4, shadowColor: palette.ink, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.12, shadowRadius: 4 },
   navButtonText: { color: palette.ink, fontSize: 12, fontWeight: '700' },
   locationButton: { position: 'absolute', width: 50, height: 50, alignItems: 'center', justifyContent: 'center', borderRadius: 25, backgroundColor: palette.paper, elevation: 4, shadowColor: palette.ink, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.12, shadowRadius: 4 },

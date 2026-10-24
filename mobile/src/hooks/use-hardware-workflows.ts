@@ -94,8 +94,21 @@ export function useHardwareWorkflows() {
     await current.promise;
   }, [accept, markFresh]);
 
-  const reserve = useCallback((bayId: string, connectorId: string, minutes: HoldMinutes) => mutate(bayId, 'reserve', () => reserveHardwareBay(bayId, connectorId, minutes)), [mutate]);
-  const act = useCallback((action: 'entry' | 'release', bayId: string, reservationId: string) => mutate(bayId, action, () => requestHardwareAction(action, bayId, reservationId)), [mutate]);
+  const reserve = useCallback((bayId: string, connectorId: string, minutes: HoldMinutes) => {
+    if (!snapshotRef.current?.workflows.find(item => item.bay.id === bayId)?.bay.connectors.some(item => item.id === connectorId && item.enabled)) {
+      setError('Choose an enabled connector belonging to the designated bay.');
+      return Promise.resolve();
+    }
+    return mutate(bayId, 'reserve', () => reserveHardwareBay(bayId, connectorId, minutes));
+  }, [mutate]);
+  const act = useCallback((action: 'entry' | 'release', bayId: string, reservationId: string) => {
+    const reservation = snapshotRef.current?.workflows.find(item => item.bay.id === bayId)?.reservation;
+    if (!reservation?.isMine || reservation.id !== reservationId) {
+      setError('Only your current reservation can request entry or release.');
+      return Promise.resolve();
+    }
+    return mutate(bayId, action, () => requestHardwareAction(action, bayId, reservationId));
+  }, [mutate]);
 
   useEffect(() => {
     mounted.current = true;

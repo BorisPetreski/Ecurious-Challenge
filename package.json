@@ -17,10 +17,11 @@
     "dev": "node --watch --env-file-if-exists=.env server.mjs",
     "test": "node --test test/*.test.mjs",
     "test:database": "node scripts/test-database.mjs",
-    "check": "node --check server.mjs && node --check public/app.js && node --check lib/ecurious-adapter.mjs && node --check scripts/start-mobile.mjs && node --check scripts/start-server.mjs && node --check scripts/start-expo.mjs && node --check scripts/mobile-environment.mjs && node --check scripts/inspect-hardware.mjs && npm --prefix mobile run typecheck",
+    "check": "node --check server.mjs && node --check public/app.js && node --check lib/ecurious-adapter.mjs && node --check lib/hardware-store.mjs && node --check lib/hardware-workflow.mjs && node --check lib/hardware-slots.mjs && node --check scripts/setup-supabase.mjs && node --check scripts/start-mobile.mjs && node --check scripts/start-server.mjs && node --check scripts/start-expo.mjs && node --check scripts/mobile-environment.mjs && node --check scripts/inspect-hardware.mjs && npm --prefix mobile run typecheck",
     "mobile:check": "npm --prefix mobile run typecheck",
     "mobile:doctor": "npm --prefix mobile run doctor",
     "hardware:inspect": "node --env-file-if-exists=.env scripts/inspect-hardware.mjs",
-    "doctor": "node --env-file-if-exists=.env scripts/doctor.mjs"
+    "doctor": "node --env-file-if-exists=.env scripts/doctor.mjs",
+    "supabase:setup": "node --env-file-if-exists=.env scripts/setup-supabase.mjs"
   }
 }

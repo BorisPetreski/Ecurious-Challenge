@@ -1,4 +1,4 @@
-import { useRouter } from 'expo-router';
+import { Link, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView,
@@ -137,7 +137,8 @@ export default function ProfileScreen() {
               <Text style={styles.help}>No real card details are collected and no payment is taken.</Text>
             </View>
 
-            <View style={styles.privacy}><Text style={styles.privacyTitle}>Saved on this device</Text><Text style={styles.help}>Your contact details and plate stay in this phone’s secure storage. They are not sent to the charging directory, Supabase, or the parking lock. This is a local profile, not a verified account.</Text></View>
+            <View style={styles.privacy}><Text style={styles.privacyTitle}>Saved on this device</Text><Text style={styles.help}>Your profile stays in this phone’s secure storage. Only a hardware time-slot booking sends its vehicle plate to the backend for camera matching; the backend stores a keyed fingerprint rather than the raw plate. Contact details and mock payment preferences stay local. If you choose email sign-in, that account email goes to Supabase Auth. The charging directory receives no profile details. This local profile is separate from your booking sign-in.</Text></View>
+            <Link href="/sign-in" asChild><Pressable accessibilityRole="button" style={[ui.button, ui.secondaryButton]}><Text style={ui.buttonText}>Sign in & account</Text></Pressable></Link>
             {Object.keys(errors).some(key => errors[key as keyof ProfileFieldErrors]) ? <Text accessibilityLiveRegion="polite" style={styles.fieldError}>Check the highlighted fields, then save again.</Text> : null}
             <ActionButton label={saving ? 'Saving…' : editing ? 'Save changes' : 'Save & continue'} onPress={() => void save()} disabled={disabled} loading={saving} variant="dark" />
             {!editing ? <Pressable accessibilityRole="button" disabled={disabled} onPress={() => void explore()} style={({ pressed }) => [styles.skipButton, pressed && ui.pressed, disabled && styles.disabled]}><Text style={styles.skipText}>Explore map first</Text><Text style={styles.skipCopy}>You can add your profile before reserving.</Text></Pressable> : null}

@@ -1,11 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { EcuriousAdapter, EcuriousApiError, ECURIOUS_BASE_URL, TELEMETRY_FRESHNESS_MS } from '../lib/ecurious-adapter.mjs';
 
 const KEY = 'fictional_adapter_test_key';
 const PLATE = 'M-DEMO-42';
 const NOW = Date.parse('2026-10-24T10:00:00.000Z');
 const clock = () => NOW;
+const NORMALIZED_PLATE = 'MDEMO42';
+const TEST_COMPARISON_SECRET = 'fictional_private_plate_comparison_secret';
+const plateFingerprint = plate => createHmac('sha256', TEST_COMPARISON_SECRET).update(plate.normalize('NFKC').toUpperCase().replace(/[ -]/g, '')).digest('hex');
+const EXPECTED_FINGERPRINT = plateFingerprint(NORMALIZED_PLATE);
+const comparePlate = (observed, expected) => timingSafeEqual(Buffer.from(plateFingerprint(observed), 'hex'), Buffer.from(expected, 'hex'));
 const jsonResponse = (value, options = {}) => new Response(JSON.stringify(value), {
   ...options,
   headers: { 'content-type': 'application/json', ...options.headers },
@@ -111,6 +117,26 @@ test('whitelist projection identifies wildcard, disabled and unknown without exp
   for (const [value, mode, count] of [[['*'], 'any-plate', 1], [[], 'disabled', 0], [undefined, 'unknown', null], [[42], 'unknown', null]]) {
     const result = await reader({ lock: lock({ whitelist: value }) }).getStatus('lock-demo-1');
     assert.deepEqual(result.whitelist, { mode, count });
+  }
+});
+
+test('fault projection distinguishes an explicitly empty list from missing or malformed fault telemetry', async () => {
+  for (const [activeErrors, known] of [[[], true], [undefined, false], [null, false], ['not-a-list', false]]) {
+    const result = await reader({ lock: lock({ activeErrors }) }).getStatus('lock-demo-1');
+    assert.equal(result.faultsKnown, known);
+    assert.deepEqual(result.activeErrors, []);
+  }
+});
+
+test('occupancy uses the documented string field and never guesses from boolean or raw numeric aliases', async () => {
+  for (const fields of [
+    { carPresence: true },
+    { carPresence: undefined, carPresent: true },
+    { carPresence: undefined, carPresenceRaw: 1 },
+  ]) {
+    const result = await reader({ lock: lock(fields) }).getStatus('lock-demo-1');
+    assert.equal(result.occupancy, 'unknown');
+    assert.equal(result.lastReportedPresence, 'unknown');
   }
 });
 
@@ -333,4 +359,143 @@ test('command timeout aborts once and explicitly preserves the possibility of an
   });
   assert.equal(requests, 1);
   assert.equal(aborted, true);
+});
+
+test('plate access methods replace the policy with one normalized plate or an empty list, acknowledging without exposing plates', async () => {
+  for (const [method, requestedPlate, expectedAccess] of [['setPlateAccess', NORMALIZED_PLATE, 'specific-plates'], ['clearPlateAccess', undefined, 'disabled']]) {
+    let calls = 0;
+    const adapter = reader(null, { fetchImpl: async (input, options) => {
+      calls++;
+      const url = new URL(input);
+      assert.equal(url.pathname, '/api/v1/locks/lock-demo-1/whitelist');
+      assert.equal(url.search, '');
+      assert.equal(options.method, 'POST');
+      assert.equal(options.redirect, 'error');
+      assert.equal(options.headers['X-API-Key'], KEY);
+      const plates = requestedPlate ? [requestedPlate] : [];
+      assert.deepEqual(JSON.parse(options.body), { plates });
+      return jsonResponse({ success: true, whitelist: plates, message: `${KEY} ${PLATE}`, latestPhoto: { licensePlate: PLATE } });
+    } });
+    const result = await adapter[method]('lock-demo-1', requestedPlate);
+    assert.deepEqual(result, { lockId: 'lock-demo-1', requestedAccess: expectedAccess, acknowledged: true, confirmed: false, requestedAt: new Date(NOW).toISOString() });
+    for (const value of [KEY, PLATE, NORMALIZED_PLATE, 'latestPhoto']) assert.ok(!JSON.stringify(result).includes(value));
+    assert.equal(calls, 1);
+  }
+});
+
+test('plate access rejects wildcard, unnormalized, invalid, overlong and missing-config inputs before dispatch', async () => {
+  let calls = 0;
+  const fetchImpl = () => { calls++; throw new Error('No network expected'); };
+  const adapter = reader(null, { fetchImpl });
+  for (const value of ['*', 'm-demo-42', 'M-DEMO-42', 'M DEMO42', 'A', 'A'.repeat(16), '\nMDEMO42', undefined, [NORMALIZED_PLATE]]) {
+    await rejectsWith(() => adapter.setPlateAccess('lock-demo-1', value), 'ECURIOUS_PLATE_INVALID', [KEY]);
+  }
+  const missing = new EcuriousAdapter({ fetchImpl });
+  await rejectsWith(() => missing.setPlateAccess('lock-demo-1', NORMALIZED_PLATE), 'ECURIOUS_NOT_CONFIGURED');
+  await rejectsWith(() => missing.clearPlateAccess('lock-demo-1'), 'ECURIOUS_NOT_CONFIGURED');
+  await rejectsWith(() => adapter.clearPlateAccess('../untrusted-lock'), 'ECURIOUS_LOCK_ID');
+  assert.equal(calls, 0);
+});
+
+test('negative or mismatched whitelist echoes remain uncertain and are never retried', async () => {
+  for (const response of [
+    { success: true },
+    { success: false, whitelist: [NORMALIZED_PLATE] },
+    { success: true, whitelist: ['*'] },
+    { success: true, whitelist: [NORMALIZED_PLATE, 'OTHERDEMO'] },
+    { success: true, whitelist: [] },
+  ]) {
+    let calls = 0;
+    const adapter = reader(response, { fetchImpl: async () => { calls++; return jsonResponse(response); } });
+    await assert.rejects(() => adapter.setPlateAccess('lock-demo-1', NORMALIZED_PLATE), error => {
+      assert.equal(error.code, 'ECURIOUS_COMMAND_UNCERTAIN');
+      assert.equal(error.uncertain, true);
+      assert.ok(!error.message.includes(NORMALIZED_PLATE));
+      return true;
+    });
+    assert.equal(calls, 1);
+  }
+});
+
+test('a whitelist timeout preserves unknown future access instead of claiming the plate was removed', async () => {
+  let calls = 0;
+  const adapter = reader(null, { timeoutMs: 20, fetchImpl: async (_url, { signal }) => {
+    calls++;
+    return new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error(`${KEY} ${PLATE}`)), { once: true }));
+  } });
+  await assert.rejects(() => adapter.clearPlateAccess('lock-demo-1'), error => error.code === 'ECURIOUS_COMMAND_UNCERTAIN' && error.uncertain === true && error.status === 504 && !error.message.includes(KEY) && !error.message.includes(PLATE));
+  assert.equal(calls, 1);
+});
+
+test('private plate matching uses the backend comparator only for a newer observation and returns no raw plate or fingerprint', async () => {
+  let calls = 0;
+  const observedAt = new Date(NOW - 500).toISOString();
+  const adapter = reader({ lockId: 'lock-demo-1', timestamp: observedAt, licensePlate: PLATE }, {
+    fetchImpl: async (input, options) => {
+      assert.equal(new URL(input).pathname, '/api/v1/locks/lock-demo-1/plate/latest');
+      assert.equal(options.method, 'GET');
+      return jsonResponse({ lockId: 'lock-demo-1', timestamp: observedAt, licensePlate: PLATE, image: 'fictional-photo' });
+    },
+  });
+  const result = await adapter.getPlateMatch('lock-demo-1', {
+    expectedFingerprint: EXPECTED_FINGERPRINT,
+    comparePlate: (observed, fingerprint) => { calls++; return comparePlate(observed, fingerprint); },
+    notBefore: new Date(NOW - 1_000).toISOString(),
+  });
+  assert.deepEqual(result, { lockId: 'lock-demo-1', timestamp: observedAt, matched: true });
+  assert.equal(calls, 1);
+  for (const value of [PLATE, NORMALIZED_PLATE, KEY, EXPECTED_FINGERPRINT, TEST_COMPARISON_SECRET, 'fictional-photo']) assert.ok(!JSON.stringify(result).includes(value));
+  const publicObservation = await adapter.getLatestPlate('lock-demo-1');
+  assert.deepEqual(publicObservation, { lockId: 'lock-demo-1', timestamp: observedAt, detected: true });
+});
+
+test('old, equal-boundary, future and missing plate events cannot become arrival matches', async () => {
+  let comparisons = 0;
+  const notBefore = new Date(NOW - 1_000).toISOString();
+  for (const observedAt of [NOW - 1_001, NOW - 1_000, NOW + 1]) {
+    const adapter = reader({ lockId: 'lock-demo-1', timestamp: new Date(observedAt).toISOString(), licensePlate: PLATE });
+    const result = await adapter.getPlateMatch('lock-demo-1', { expectedFingerprint: EXPECTED_FINGERPRINT, comparePlate: () => { comparisons++; return true; }, notBefore });
+    assert.equal(result.matched, false);
+  }
+  const missing = reader(null, { fetchImpl: async () => jsonResponse({ error: 'No recognition yet' }, { status: 404 }) });
+  assert.deepEqual(await missing.getPlateMatch('lock-demo-1', { expectedFingerprint: EXPECTED_FINGERPRINT, comparePlate, notBefore }), { lockId: 'lock-demo-1', timestamp: null, matched: false });
+  await rejectsWith(() => missing.getLatestPlate('lock-demo-1'), 'ECURIOUS_NOT_FOUND');
+  const photoOnly = reader({ lockId: 'lock-demo-1', latestPhoto: { licensePlate: PLATE, timestamp: new Date(NOW - 1).toISOString() } });
+  await rejectsWith(() => photoOnly.getPlateMatch('lock-demo-1', { expectedFingerprint: EXPECTED_FINGERPRINT, comparePlate, notBefore }), 'ECURIOUS_RESPONSE');
+  assert.equal(comparisons, 0);
+});
+
+test('malformed/wrong-lock recognition and comparator exceptions stay sanitized', async () => {
+  const options = { expectedFingerprint: EXPECTED_FINGERPRINT, comparePlate, notBefore: new Date(NOW - 1_000).toISOString() };
+  await rejectsWith(() => reader({ lockId: 'different-lock', timestamp: new Date(NOW - 1).toISOString(), licensePlate: PLATE }).getPlateMatch('lock-demo-1', options), 'ECURIOUS_RESPONSE', [PLATE]);
+  const adapter = reader({ lockId: 'lock-demo-1', timestamp: new Date(NOW - 1).toISOString(), licensePlate: PLATE });
+  for (const compare of [() => { throw new Error(`${PLATE} ${TEST_COMPARISON_SECRET}`); }, () => 'true']) {
+    await rejectsWith(() => adapter.getPlateMatch('lock-demo-1', { ...options, comparePlate: compare }), 'ECURIOUS_PLATE_MATCH_FAILED', [PLATE, TEST_COMPARISON_SECRET]);
+  }
+  let requests = 0;
+  const noFetch = reader(null, { fetchImpl: () => { requests++; throw new Error('No request expected'); } });
+  await rejectsWith(() => noFetch.getPlateMatch('lock-demo-1', { ...options, expectedFingerprint: PLATE }), 'ECURIOUS_PLATE_MATCH_CONFIGURATION', [PLATE]);
+  await rejectsWith(() => noFetch.getPlateMatch('lock-demo-1', { ...options, notBefore: 'unreadable' }), 'ECURIOUS_PLATE_MATCH_CONFIGURATION');
+  assert.equal(requests, 0);
+});
+
+test('private access verification requires exactly the expected sole plate and returns policy metadata only', async () => {
+  let comparisons = 0;
+  const options = { expectedFingerprint: EXPECTED_FINGERPRINT, comparePlate: (plate, fingerprint) => { comparisons++; return comparePlate(plate, fingerprint); } };
+  for (const [whitelist, accessMode, expected] of [
+    [[NORMALIZED_PLATE], 'specific-plates', true],
+    [['OTHERDEMO'], 'specific-plates', false],
+    [['*'], 'any-plate', false],
+    [[], 'disabled', false],
+    [[NORMALIZED_PLATE, 'OTHERDEMO'], 'specific-plates', false],
+    [undefined, 'unknown', false],
+  ]) {
+    const adapter = reader({ lock: lock({ whitelist, latestPhoto: { licensePlate: PLATE } }) });
+    const result = await adapter.getPlateAccessMatch('lock-demo-1', options);
+    assert.deepEqual(result, { lockId: 'lock-demo-1', accessMode, matched: expected, observedAt: new Date(NOW - 1_000).toISOString() });
+    for (const value of [PLATE, NORMALIZED_PLATE, EXPECTED_FINGERPRINT, TEST_COMPARISON_SECRET]) assert.ok(!JSON.stringify(result).includes(value));
+  }
+  assert.equal(comparisons, 2);
+  await rejectsWith(() => reader({ lock: lock({ id: 'different-lock' }) }).getPlateAccessMatch('lock-demo-1', options), 'ECURIOUS_RESPONSE');
+  await rejectsWith(() => reader({ lock: lock({ whitelist: [NORMALIZED_PLATE] }) }).getPlateAccessMatch('lock-demo-1', { ...options, comparePlate: () => { throw new Error(`${PLATE} ${TEST_COMPARISON_SECRET}`); } }), 'ECURIOUS_PLATE_MATCH_FAILED', [PLATE, TEST_COMPARISON_SECRET]);
 });
