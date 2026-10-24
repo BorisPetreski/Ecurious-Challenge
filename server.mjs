@@ -136,9 +136,17 @@ export function start({ env = process.env } = {}) {
   if (!/^\d+$/.test(rawPort) || Number(rawPort) < 1 || Number(rawPort) > 65535) {
     throw new Error('PORT must be a whole number from 1 to 65535.');
   }
+  const host = env.HOST ?? '127.0.0.1';
+  if (!['127.0.0.1', 'localhost', '0.0.0.0'].includes(host)) {
+    throw new Error('HOST must be 127.0.0.1, localhost, or 0.0.0.0.');
+  }
   const server = createServer();
-  server.listen(Number(rawPort), '127.0.0.1', () => {
-    console.log(`Ecurious local simulator: http://127.0.0.1:${rawPort} (mock only; no live hardware connected)`);
+  server.listen(Number(rawPort), host, () => {
+    const localHost = host === '0.0.0.0' ? '127.0.0.1' : host;
+    console.log(`Ecurious local simulator: http://${localHost}:${rawPort} (mock only; no live hardware connected)`);
+    if (host === '0.0.0.0') {
+      console.log(`LAN simulator enabled on 0.0.0.0:${rawPort}. Expo Go can use http://<laptop-LAN-IP>:${rawPort} on the same network.`);
+    }
   });
   server.on('error', error => {
     console.error(error.code === 'EADDRINUSE' ? `Port ${rawPort} is in use. Choose another PORT in .env.` : 'The local simulator could not start.');

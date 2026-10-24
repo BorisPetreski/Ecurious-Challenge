@@ -1,69 +1,79 @@
-# BayReady hackathon starter
+# Ecurious Challenge
 
-A local coding starter for the Ecurious challenge at WATT THE HACK on 24 October 2026. Rehearse a reservation cycle tonight, then replace the simulator with the documented Ecurious integration at the venue. The proposed focus is **no-shows and blocked bays**, with plate recognition in the required arrival flow.
+BayReady is an Expo mobile starter for the Ecurious WATT THE HACK challenge on 24 October 2026. The primary target is Android with Expo Go. The proposed mission areas are no-shows and blocked bays; confirm final product scope with your team.
 
-## Start in one minute
+## Start the mobile app
 
-Install Node 24 or newer with npm. The simulator has no package dependencies, build step, or container requirements.
+Node 24+ and npm are required. Dependencies are already installed in the current workspace. On a fresh checkout:
 
 ```sh
 git clone https://github.com/BorisPetreski/Ecurious-Challenge.git
 cd Ecurious-Challenge
-npm run doctor
-npm test
+npm --prefix mobile ci
+```
+
+From the project root:
+
+```sh
 npm start
 ```
 
-Open **http://127.0.0.1:3000**. Keep the terminal running; Ctrl+C stops the server. If port 3000 is busy, use `PORT=3001 npm start`. Alternatively, double-click `launch.command` on this Mac.
+This runs both the local reservation API on port 3000 and Expo Metro on port 8081. Update Expo Go on your Android phone, connect the phone and laptop to the same Wi-Fi, and scan the terminal QR code in Expo Go. Ctrl+C stops both processes. If API port 3000 is busy, use `PORT=3001 npm start`.
 
-If you already have this workspace open, run the npm commands from its existing folder. Optional settings go in `.env`: copy `.env.example` to `.env` before editing the port. `.env` is ignored by Git.
+The mobile app uses Expo SDK 58, React Native, Expo Router, and TypeScript. It connects to the existing simulator over the local network. See [mobile setup and troubleshooting](mobile/README.md) for API address overrides and connection details.
 
-The demo runs entirely locally. Only the optional GoingElectric search makes an external request, after you explicitly submit an API key. Reservations and events are in memory and disappear when the server restarts.
+## Current behavior
 
-## Working with the team
+- Map tab displaying GoingElectric's official interactive website directly, without an API key.
+- Native reservation screen and activity timeline backed by the local simulator.
+- Fictional station cards with one reservable demo bay.
+- Reserve, simulated plate check, simulated charging, departure, and release.
+- No-show expiry, blocked-bay scenarios, low-confidence recognition, and capability-driven controls.
+- Typed API client with bounded requests and polling while the app is active.
 
-The shared repository is [BorisPetreski/Ecurious-Challenge](https://github.com/BorisPetreski/Ecurious-Challenge). Give coding teammates repository write access through GitHub before they push.
+All hardware and charging actions remain simulated. Real Ecurious integration is deliberately unimplemented and live mode refuses startup. The Map tab loads the official GoingElectric website in a native WebView, retaining its search, filters, source attribution, and station pages. A custom native map using GoingElectric's API remains future work and needs approved API access. Directory stations never automatically map to the designated Ecurious test bay.
 
-Start each piece of work from an up-to-date `main` and use a separate branch:
+## Useful commands
 
-```sh
-git switch main
-git pull --ff-only
-git switch -c feature/your-task
-```
+| Command | Purpose |
+| --- | --- |
+| `npm start` | Expo and the phone-accessible simulator API together |
+| `npm run mobile` | Expo only |
+| `npm run server:lan` | Simulator API only, reachable from a phone on the LAN |
+| `npm run server` | Original browser demo and API on loopback |
+| `npm run dev` | Watch and restart the standalone backend |
+| `npm test` | Backend lifecycle and HTTP checks |
+| `npm run check` | JavaScript syntax and native TypeScript checks |
+| `npm run mobile:doctor` | Expo project checks |
+| `npm run doctor` | Backend setup and available-port check |
 
-Before sharing a change, run `npm test` and `npm run check`, then commit the relevant files and push your branch with `git push -u origin feature/your-task`. Open a pull request for the team to review. Keep keys, real plates, camera captures, and private runtime files out of commits; the existing ignore rules cover `.env`, `.local/`, `captures/`, and `private/`.
+The standalone browser demo is available at http://127.0.0.1:3000 while the API runs. Optional backend settings go in `.env`, copied from `.env.example`. Mobile address overrides go in `mobile/.env`, copied from `mobile/.env.example`. Both actual environment files are ignored by Git. Never place hardware secrets in an `EXPO_PUBLIC_` variable; those values are bundled into the app.
 
-## Rehearse the flow
+## Where to develop
 
-Use a fictional plate such as `M-DEMO-42`. Reserve the demo bay, simulate the matching arrival, start simulated charging, simulate departure, then release the booking. Use the scenario controls to rehearse no-show expiry, an occupied bay, and a low-confidence plate. Every hardware and charging action in this starter is simulated.
+| Path | Purpose |
+| --- | --- |
+| `mobile/src/app/` | Native screens and navigation |
+| `mobile/src/components/` | Shared mobile UI and state provider |
+| `mobile/src/hooks/use-reservation.ts` | Foreground polling and booking actions |
+| `mobile/src/lib/reservation-api.ts` | Typed client and API address selection |
+| `mobile/app.json` | Expo app configuration |
+| `server.mjs` and `lib/simulator.mjs` | Local API and reservation rules |
+| `lib/ecurious-adapter.mjs` | Real hardware boundary to implement from supplied documentation |
+| `public/` | Original browser prototype |
 
-The optional GoingElectric panel makes a direct request from the browser using an approved API key. Real results are discovery only: they are **not mapped to the Ecurious test hardware**. Default station cards are synthetic. Browser access, credentials, and the hardware mapping must be confirmed on site.
+## Team and submission references
 
-## Your preparation pack
-
-- [Tomorrow's plan and team split](docs/TOMORROW.md): what matters, tonight's checklist, mentor questions, build order.
-- [Integration guide](docs/INTEGRATION.md): architecture, API boundary, state rules, what to implement first at the venue.
-- [Demo and pitch](docs/PITCH.md): a three-minute script, business hypothesis, judge questions.
-- [Build log](docs/BUILD-LOG.md): record actual API calls, decisions, failures, and evidence as you work.
+- [Preparation plan and team formation](docs/TOMORROW.md).
+- [Architecture and integration guide](docs/INTEGRATION.md).
+- [Demo and pitch rehearsal](docs/PITCH.md).
+- [Build log and evidence checklist](docs/BUILD-LOG.md).
 - [Original challenge brief](source/challenge-brief.pdf) and [extracted text](source/challenge-brief.txt).
 
-## Where to code tomorrow
+The repository is [BorisPetreski/Ecurious-Challenge](https://github.com/BorisPetreski/Ecurious-Challenge). The user manages Git; no push is performed by the setup scripts. Keep `.env`, private runtime data, real plates, and camera captures out of commits. The scripts do not create cloud builds, publish an app, or configure a production backend.
 
-| File | Purpose |
-| --- | --- |
-| `lib/ecurious-adapter.mjs` | Deliberately unimplemented hardware boundary; fill from the on-site docs |
-| `lib/` | Reservation logic and simulator |
-| `server.mjs` | Local HTTP API and static files |
-| `public/app.js` | UI behavior and direct GoingElectric search |
-| `public/styles.css` | Responsive interface |
-| `test/` | Meaningful lifecycle and API checks |
+## Integration priorities
 
-`ECURIOUS_MODE=live` deliberately refuses startup until the real integration has been implemented. The present starter cannot satisfy the challenge's required live hardware cycle. The GoingElectric integration also needs an approved key and a successful browser request before it can be counted as working.
+Obtain the actual Ecurious API documentation, credentials, designated bay ID, status/event semantics, and accepted charging evidence. Connect one full real reservation cycle before adding extra features. A polished app is optional in the brief; a working hardware integration is required for top ranks.
 
-## Stack choice
-
-Node's HTTP server, native browser JavaScript, and Node's test runner keep setup short and work offline. A database, framework, payment integration, and custom camera recognition are unnecessary for the first live cycle. The camera and reservation hardware are provided by Ecurious.
-
-Source material: [challenge brief](source/challenge-brief.pdf), [GoingElectric API documentation](https://www.goingelectric.de/stromtankstellen/api/docs/), and [GoingElectric API terms](https://www.goingelectric.de/stromtankstellen/api/terms/), checked 23 October 2026. The brief is reference material; the defaults and product choices in this repository are proposed team decisions.
-# Ecurious-Challenge
+Source references: [GoingElectric API documentation](https://www.goingelectric.de/stromtankstellen/api/docs/), [GoingElectric API terms](https://www.goingelectric.de/stromtankstellen/api/terms/), and [Expo documentation](https://docs.expo.dev/). Product defaults and hypothetical pricing remain proposals for the team.

@@ -87,3 +87,9 @@ test('startup refuses live or unknown modes and invalid ports before listening',
     assert.throws(() => start({ env: { PORT: port } }), /PORT must be/);
   }
 });
+
+test('startup refuses unsupported bind hosts before listening', () => {
+  for (const host of ['', 'example.com', '192.168.1.42', '::']) {
+    assert.throws(() => start({ env: { HOST: host } }), /HOST must be 127\.0\.0\.1, localhost, or 0\.0\.0\.0/);
+  }
+});

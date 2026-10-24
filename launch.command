@@ -10,5 +10,5 @@ if ! command -v npm >/dev/null 2>&1; then
   read '?Press Enter to close.'
   exit 1
 fi
-print 'Starting the simulator. Open the URL printed below; Ctrl+C stops it.'
+print 'Starting Expo and the simulator. Scan the QR code in Expo Go; Ctrl+C stops both.'
 npm start

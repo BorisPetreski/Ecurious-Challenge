@@ -1,20 +1,25 @@
 # Coding and integration guide
 
-The current application is an in-memory simulator with a browser UI and local HTTP API. The live Ecurious API is intentionally unimplemented because its documentation and credentials are supplied on site. The app must not report a physical action as complete on the strength of a UI click or an unconfirmed command response.
+The primary application is now an Expo mobile app in `mobile/`, connected over HTTP to the existing in-memory Node simulator. The original browser demo remains in `public/`. The live Ecurious API is intentionally unimplemented because its documentation and credentials are supplied on site. The app must not report a physical action as complete on the strength of a UI click or an unconfirmed command response.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-  Driver[Browser UI] --> Local[Local Node reservation API]
+  Driver[Expo mobile UI] --> Local[Local Node reservation API]
+  Browser[Original browser demo] --> Local
   Local --> Sim[In-memory simulator today]
   Local -. Implement on site .-> Adapter[Ecurious adapter]
   Adapter -. Documented API .-> Server[Ecurious test server]
   Server --> Bay[Reservation hardware and camera]
-  Driver -->|Direct user-device request with approved key| GE[GoingElectric discovery API]
+  Browser -->|Direct user-device request with approved key| GE[GoingElectric discovery API]
+  Driver --> WebMap[Official GoingElectric website in WebView]
+  Driver -. Custom native API integration pending .-> GE
 ```
 
 GoingElectric location/connector data and Ecurious bay occupancy have different sources. Add an explicit mapping from the mentor-confirmed station/EVSE/bay to the designated test hardware. Never enable reservations on arbitrary directory results merely because they appear nearby.
+
+`npm start` starts Expo and binds the mock API to `0.0.0.0` for phone access. The standalone server still defaults to loopback; `npm run server:lan` intentionally exposes this local simulator to the LAN. Native fetch does not need browser CORS settings. See `mobile/README.md` for address overrides and same-network setup.
 
 ## Local API
 

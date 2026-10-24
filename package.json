@@ -3,15 +3,22 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "A local simulator for preparing the Ecurious charging reservation hackathon demo.",
+  "description": "BayReady Expo mobile app and local Ecurious reservation simulator.",
   "engines": {
     "node": ">=24"
   },
   "scripts": {
-    "start": "node --env-file-if-exists=.env server.mjs",
+    "start": "node scripts/start-mobile.mjs",
+    "mobile": "npm --prefix mobile start",
+    "android": "npm --prefix mobile run android",
+    "ios": "npm --prefix mobile run ios",
+    "server": "node --env-file-if-exists=.env server.mjs",
+    "server:lan": "node scripts/start-server.mjs --lan",
     "dev": "node --watch --env-file-if-exists=.env server.mjs",
-    "test": "node --test",
-    "check": "node --check server.mjs && node --check public/app.js",
+    "test": "node --test test/*.test.mjs",
+    "check": "node --check server.mjs && node --check public/app.js && node --check scripts/start-mobile.mjs && node --check scripts/start-server.mjs && npm --prefix mobile run typecheck",
+    "mobile:check": "npm --prefix mobile run typecheck",
+    "mobile:doctor": "npm --prefix mobile run doctor",
     "doctor": "node --env-file-if-exists=.env scripts/doctor.mjs"
   }
 }

@@ -7,13 +7,23 @@ Keep this updated during the event. Replace bracketed fields with observations; 
 - Prepared on 23 October 2026: dependency-free local Node/browser simulator, synthetic stations, optional direct GoingElectric discovery, adapter boundary, lifecycle tests, and preparation documentation.
 - Real hardware integration: **not implemented in the prepared starter**.
 - GoingElectric live access: **requires approved key and an on-site browser test**.
-- Chosen mission areas: no-shows and blocked bays.
-- Team members and responsibilities: [fill in].
+- Proposed mission areas: no-shows and blocked bays; confirm with the team at the event.
+- Teams form at the event on 24 October 2026. Team members and responsibilities: [fill in after formation].
 - Event reuse/disclosure rules checked with: [name/source and result].
 
 ## Preparation checks
 
 On 23 October 2026, all 15 Node tests passed, including the simulated lifecycle, concurrent reservations, unsafe release prevention, plate uncertainty, expiry, HTTP validation, and static-file boundaries. Syntax checks, the local setup/port check, HTML element bindings, and serving the actual UI assets with the initial API state also passed. No visual browser review was run. Live Ecurious hardware and authenticated GoingElectric results remain untested pending on-site access.
+
+## Expo mobile setup on 24 October 2026
+
+- User chose a mobile app using Expo, with Android and Expo Go as the preview target. The user manages Git and requested no push.
+- Added `mobile/` using the official Expo SDK 58 template with Expo Router, React Native, TypeScript, and a committed-ready npm lockfile. Dependencies are installed locally.
+- Added native Reserve and Activity screens using the same local simulator API. Fictional plate, hold, and confidence settings stay in memory across screen navigation. Hardware and charging remain explicitly simulated; native GoingElectric discovery is pending.
+- `npm start` runs the simulator with intentional LAN access plus Expo Metro. Standalone backend access remains loopback by default. The typed native client infers the laptop address from Expo, supports an explicit public URL/port override, and uses bounded requests with foreground polling.
+- Native client smoke checks covered configuration, errors, the reservation cycle, and request cancellation. Hook checks covered serialized reads/writes, polling, background/foreground transitions, stale responses, and recovery. No new test framework was added for these focused checks.
+- Verification passed: 16 backend tests, TypeScript/syntax checks, Expo dependency alignment, all 20 Expo Doctor checks, Android bundle export, and serving the Android Expo manifest/development bundle alongside the LAN API. Physical Android device interaction and visual layout still require preview in Expo Go.
+- Real Ecurious authentication, documented hardware commands, actual plate events, accepted charging evidence, and native GoingElectric discovery remain integration work.
 
 ## On site contract
 

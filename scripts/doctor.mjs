@@ -33,5 +33,5 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
   });
 }
 
-console.log('No dependency installation is needed. Next: npm test, then npm start.');
+console.log('Backend check complete. For the mobile app, install mobile dependencies on a fresh checkout, then run npm start.');
 process.exitCode = failures ? 1 : 0;

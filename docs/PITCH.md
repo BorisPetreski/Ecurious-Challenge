@@ -1,6 +1,6 @@
 # Demo and pitch rehearsal
 
-**Concept:** BayReady gives an arriving EV driver a reserved bay with a clear deadline and a useful recovery when the bay cannot be provided. No-shows and blocked bays are the two chosen mission areas. The starter is a rehearsal tool; swap the script's live claims for actual observations after the hardware integration works.
+**Concept:** BayReady gives an arriving EV driver a reserved bay with a clear deadline and a useful recovery when the bay cannot be provided. No-shows and blocked bays are the two proposed mission areas; agree the final scope with your team after it forms at the event. The starter is a rehearsal tool; swap the script's live claims for actual observations after the hardware integration works.
 
 ## Three minute outline
 

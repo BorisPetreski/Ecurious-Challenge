@@ -1,6 +1,6 @@
 # Your plan for WATT THE HACK
 
-You own coding. Give teammates clear ownership of the driver experience, mentor questions, business assumptions, documentation, and pitch. The goal is one reliable hardware demonstration plus thoughtful handling of no-shows and blocked bays.
+Teams form at the event tomorrow. You plan to contribute coding; agree responsibilities after meeting the team. Bring BayReady as an optional starting point, and choose the stack and mission areas together. The proposed goal is one reliable hardware demonstration plus thoughtful handling of no-shows and blocked bays.
 
 ## Event and arrival
 
@@ -10,12 +10,18 @@ You own coding. Give teammates clear ownership of the driver experience, mentor 
 
 - [ ] Run `npm run doctor`, `npm test`, and `npm start`; complete the simulator cycle once.
 - [ ] Rehearse expiry and blocking once. Read the first-hour integration checklist below.
-- [ ] Agree with the team on no-shows + blocked bays; assign one person to talk to mentors while you wire the API.
+- [ ] Prepare a short introduction explaining your coding strengths and the starter you can offer. Treat no-shows + blocked bays as a proposal for tomorrow's team discussion.
 - [ ] Confirm registration, check-in room, submission format, pitch length, and the rules for reusing prepared starter code from your event materials or organisers. This is a prepared starter, so disclose its origin if required.
 - [ ] Charge laptop and phone. Pack laptop charger, USB-C hub/HDMI adapter, phone cable, headphones, water, and a power bank if available. Keep hotspot access ready.
-- [ ] Open this folder in your editor and keep the source PDF available offline. Have each coding teammate test their own Node setup.
-- [ ] Decide how to share the code tomorrow; the repository is local until you choose and configure a team remote.
+- [ ] Open this folder in your editor and keep the source PDF available offline. Be ready to show the simulator and explain its limitations.
+- [ ] Keep the local repository ready to share. Choose a team remote and check other developers' setup after the team forms.
 - [ ] Stop adding features and get some sleep.
+
+## After your team forms
+
+Spend the first 10–15 minutes comparing skills, understanding the challenge, and agreeing on one achievable demo. Offer the starter and its reasoning, then adapt to the team's preferences and the event's reuse rules.
+
+Agree who owns hardware/backend integration, the app and discovery experience, and documentation/business/pitch. Combine responsibilities according to team size. If you take hardware integration, ask someone to record mentor answers and test observations while you code. Confirm the mission areas, stack, shared repository, and submission deadline before splitting up.
 
 ## Requirements that decide your scope
 
@@ -49,7 +55,7 @@ Have a teammate record the answers in `BUILD-LOG.md` while you test the smallest
 
 | Time | Your coding focus | Teammate output |
 | --- | --- | --- |
-| 09:00–10:00 | Access, API semantics, status read, first hardware operation | Mentor answers, final scope, test vehicle |
+| 09:00–10:00 | Team formation, roles/scope agreement, then access and first status read as time permits | Shared approach, mentor answers, test vehicle |
 | 10:00–12:00 | Smallest real reserve → plate arrival → charge evidence → release cycle | UX copy, GoingElectric access, diagram, continuous build notes |
 | 12:00–13:30 | Wire UI, discovery, and explicit station-to-bay mapping | Draft pitch and value hypothesis |
 | 13:30–15:00 | No-show timer, occupied bay, plate uncertainty, status/error handling | Test scenarios and observed results |
