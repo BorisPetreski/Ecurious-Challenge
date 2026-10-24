@@ -1,6 +1,6 @@
 # Project context
 
-This is BayReady for the Ecurious WATT THE HACK challenge on 24 October 2026. The user has chosen an Expo mobile app, primarily Android with Expo Go. The app lives in `mobile/`; the existing Node reservation simulator remains its backend. Read `README.md`, `docs/INTEGRATION.md`, and the source brief before changing the integration. Teams form at the event; roles and final product scope are agreed with the team. The user manages Git and explicitly requested no push; do not push without a new instruction.
+This is BayReady for the Ecurious WATT THE HACK challenge on 24 October 2026. The user has chosen an Expo mobile app, primarily Android with Expo Go. The app lives in `mobile/`; the existing Node reservation simulator remains its backend. Read `README.md`, `docs/INTEGRATION.md`, and the source brief before changing the integration. Teams form at the event; roles and final product scope are agreed with the team. The user manages Git; push only when explicitly requested. The user authorized pushing the mobile app and map integration on 24 October 2026.
 
 ## Working commands
 

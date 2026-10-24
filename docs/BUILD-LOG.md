@@ -25,6 +25,16 @@ On 23 October 2026, all 15 Node tests passed, including the simulated lifecycle,
 - Verification passed: 16 backend tests, TypeScript/syntax checks, Expo dependency alignment, all 20 Expo Doctor checks, Android bundle export, and serving the Android Expo manifest/development bundle alongside the LAN API. Physical Android device interaction and visual layout still require preview in Expo Go.
 - Real Ecurious authentication, documented hardware commands, actual plate events, accepted charging evidence, and native GoingElectric discovery remain integration work.
 
+## GoingElectric map and repository handoff on 24 October 2026
+
+- User requested the GoingElectric map and confirmed that no API key is available, choosing the official map for now.
+- Added a Map tab that loads `https://www.goingelectric.de/stromtankstellen/` directly in Expo-compatible `react-native-webview`. The original website provides map gestures, search, filters, station pages, attribution, and its browsing experience. No scraping, content injection, directory proxy, or app-owned GoingElectric API key is used.
+- Native controls provide back navigation, reload, browser fallback, progress, and recoverable errors. The Map tab uses a DIRECTORY badge and does not depend on simulator availability; Reserve and Activity keep their SIMULATOR badges. Public directory stations are not mapped to the hardware demo bay.
+- Added navigation-policy checks for trusted directory hosts, outbound browser links, executable/local URL rejection, and main-document versus subresource HTTP errors.
+- Verified 19 tests, native TypeScript/syntax checks, all 20 Expo Doctor checks, and Android bundle export. Physical Android map gestures, website rendering, and location permission behavior still require verification in Expo Go.
+- Corrected a strict-TypeScript issue in WebView 14's declaration using its explicit extra-props generic, preserving typed props and event callbacks.
+- User subsequently authorized pushing the mobile app and map integration to `BorisPetreski/Ecurious-Challenge`, replacing the earlier no-push instruction. The shared repository remains the source handoff; no app-store release or live hardware deployment is part of this change.
+
 ## On site contract
 
 | Question | Actual answer |
